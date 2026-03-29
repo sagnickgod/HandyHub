@@ -28,14 +28,14 @@ export function AuthProvider({ children }) {
 
       if (error) {
         if (error.code === 'PGRST116') {
+          // PGRST116 means "No rows found" - legitimate new user
           setProfile(null)
           profileCacheRef.current = null
         } else {
           console.error('[AuthContext] DB error:', error)
-          // Don't overwrite a good cached profile with an error state
-          if (!profileCacheRef.current) {
-            setProfile({ error: true, message: error.message })
-          }
+          // Fix: ONLY set error state if we don't already have a valid profile
+          // This prevents kicking active users out if a background refresh fails
+          setProfile(prev => prev ? prev : { error: true, message: error.message })
         }
         return
       }
@@ -44,9 +44,8 @@ export function AuthProvider({ children }) {
       setProfile(data)
     } catch (err) {
       console.error('[AuthContext] Fetch exception:', err)
-      if (!profileCacheRef.current) {
-        setProfile({ error: true, message: err.message })
-      }
+      // Apply the same fix in the catch block
+      setProfile(prev => prev ? prev : { error: true, message: err.message })
     }
   }
 
@@ -88,47 +87,39 @@ export function AuthProvider({ children }) {
       }
     }
 
-    initSession()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (!mounted) return
-        console.log('[AuthContext] Event:', event)
-
-        if (event === 'SIGNED_OUT') {
-          setUser(null)
-          setProfile(null)
-          profileCacheRef.current = null
-          setLoading(false)
-          return
-        }
-
-        if (event === 'INITIAL_SESSION') {
-          // Handled by initSession above, skip
-          return
-        }
-
-        if (session?.user) {
-          setUser(session.user)
-
-          if (event === 'SIGNED_IN') {
-            // Fresh login — force a real fetch, ignore any stale cache
-            profileCacheRef.current = null
-            setProfile(undefined)
-            await fetchProfile(session.user.id, true)
-          } else if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-            // Tab switch or token refresh — re-use cache, don't show spinner
-            await fetchProfile(session.user.id, false)
-          }
-        }
-      }
-    )
-
-    return () => {
-      mounted = false
-      subscription.unsubscribe()
+    const initSession = async () => {
+  const timeoutId = setTimeout(() => {
+    if (mounted) {
+      setLoading(false)
+      // Removed the code that sets profile to null here
+      // We don't want to mistakenly log the user out on a slow 3G connection
     }
-  }, [])
+  }, 8000)
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!mounted) return
+
+    if (session?.user) {
+      setUser(session.user)
+      await fetchProfile(session.user.id)
+    } else {
+      setUser(null)
+      setProfile(null)
+      profileCacheRef.current = null
+    }
+  } catch (err) {
+    console.error('[AuthContext] Init error:', err)
+    // Only set to null if we don't have a cached profile
+    if (mounted && !profileCacheRef.current) {
+      setUser(null)
+      setProfile(null)
+    }
+  } finally {
+    clearTimeout(timeoutId)
+    if (mounted) setLoading(false)
+  }
+}
 
   const signUp = async (email, password, metadata) => {
     const { data, error } = await supabase.auth.signUp({
@@ -169,6 +160,38 @@ export function AuthProvider({ children }) {
         .eq('id', user.id)
     }
   }
+    const handleLogin = async (e) => {
+  e.preventDefault()
+  
+  // Basic Validation
+  if (!loginEmail.trim() || !loginPassword.trim()) {
+    addToast('Please enter both email and password.', 'error')
+    return
+  }
+  
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(loginEmail)) {
+    addToast('Please enter a valid email address.', 'error')
+    return
+  }
+
+  setLoading(true)
+  
+  try {
+    const { error } = await signIn(loginEmail, loginPassword)
+    if (error) {
+      addToast(error.message, 'error')
+      setLoading(false)
+    } else {
+      addToast('Welcome back!', 'success')
+      // Navigation handled by the useEffect listener on `user`
+    }
+  } catch (err) {
+    console.error('Login error:', err)
+    addToast(err.message || 'An unexpected error occurred.', 'error')
+    setLoading(false)
+  }
+}
 
   return (
     <AuthContext.Provider value={{
