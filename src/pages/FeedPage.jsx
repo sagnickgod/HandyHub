@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, Zap, Clock, Star, LayoutGrid, Flame } from 'lucide-react'
@@ -160,16 +160,22 @@ export default function FeedPage() {
   const [search, setSearch] = useState('')
   const [searchFocused, setSearchFocused] = useState(false)
 
-  const filters = {}
-  if (activeFilter === 'urgent') filters.urgency = 'high'
-  if (activeFilter === 'deadline') filters.deadlineSoon = true
-  if (activeFilter === 'highReward') filters.minPoints = 150
-  if (sortBy === 'points') filters.sortBy = 'points'
-  if (sortBy === 'urgency') filters.sortBy = 'urgency'
-  if (search) filters.search = search
-  filters.state = 'open'
+  // FIX: Wrapped the filters object in a useMemo hook
+  // Now it only recalculates if activeFilter, sortBy, or search changes
+  const memoizedFilters = useMemo(() => {
+    const filtersObj = {}
+    if (activeFilter === 'urgent') filtersObj.urgency = 'high'
+    if (activeFilter === 'deadline') filtersObj.deadlineSoon = true
+    if (activeFilter === 'highReward') filtersObj.minPoints = 150
+    if (sortBy === 'points') filtersObj.sortBy = 'points'
+    if (sortBy === 'urgency') filtersObj.sortBy = 'urgency'
+    if (search) filtersObj.search = search
+    filtersObj.state = 'open'
+    return filtersObj
+  }, [activeFilter, sortBy, search])
 
-  const { tasks, loading, hasMore, loadMore, setTasks } = useTasks(filters)
+  // FIX: Passing the memoized object instead of a fresh one
+  const { tasks, loading, hasMore, loadMore, setTasks } = useTasks(memoizedFilters)
   const appliedTaskIds = useUserApplications(user?.id)
 
   let displayedTasks = tasks
