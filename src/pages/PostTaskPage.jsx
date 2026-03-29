@@ -53,8 +53,6 @@ export default function PostTaskPage() {
   const [urgency, setUrgency] = useState('medium')
   const [deadline, setDeadline] = useState('')
   const [files, setFiles] = useState([])
-  const [isTeam, setIsTeam] = useState(false)
-  const [teamSize, setTeamSize] = useState(2)
   const [loading, setLoading] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
 
@@ -75,7 +73,7 @@ export default function PostTaskPage() {
 
     setLoading(true)
 
-    // Insert task
+    // Insert task (hardcoded is_team_task to false to prevent logic bugs)
     const { data: task, error } = await supabase.from('tasks').insert({
       poster_id: profile.id,
       title: title.trim(),
@@ -84,8 +82,8 @@ export default function PostTaskPage() {
       points_offered: points,
       urgency,
       deadline: deadline || null,
-      is_team_task: isTeam,
-      team_size: isTeam ? teamSize : 1,
+      is_team_task: false,
+      team_size: 1,
     }).select().single()
 
     if (error) { addToast(error.message, 'error'); setLoading(false); return }
@@ -103,6 +101,9 @@ export default function PostTaskPage() {
           file_name: file.name,
           uploaded_by: profile.id
         })
+      } else {
+        // Added error toast for silent upload failures
+        addToast(`Failed to upload ${file.name}`, 'error')
       }
     }
 
@@ -239,27 +240,6 @@ export default function PostTaskPage() {
                     <button type="button" onClick={() => setFiles(files.filter((_, idx) => idx !== i))}><X size={14} /></button>
                   </div>
                 ))}
-              </div>
-            )}
-          </div>
-
-          {/* Team task */}
-          <div className="glass-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Team Task?</span>
-              <button type="button" onClick={() => setIsTeam(!isTeam)}
-                className={`w-12 h-6 rounded-full transition-colors ${isTeam ? 'bg-primary' : 'bg-border'} relative`}>
-                <div className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${isTeam ? 'translate-x-6' : 'translate-x-0.5'}`} />
-              </button>
-            </div>
-            {isTeam && (
-              <div className="mt-3">
-                <label className="text-sm text-text-muted">Helpers needed</label>
-                <div className="flex items-center gap-3 mt-1">
-                  <button type="button" onClick={() => setTeamSize(Math.max(2, teamSize - 1))} className="w-8 h-8 bg-surface-2 rounded-lg font-bold">−</button>
-                  <span className="font-bold text-lg w-8 text-center">{teamSize}</span>
-                  <button type="button" onClick={() => setTeamSize(Math.min(10, teamSize + 1))} className="w-8 h-8 bg-surface-2 rounded-lg font-bold">+</button>
-                </div>
               </div>
             )}
           </div>
