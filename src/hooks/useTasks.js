@@ -147,3 +147,32 @@ export function useUserApplications(userId) {
 
   return applicationTaskIds
 }
+export function useApplications(taskId) {
+  const [applications, setApplications] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null) // Added error state
+
+  const fetchApps = useCallback(async () => {
+    setLoading(true)
+    const { data, error: dbError } = await supabase
+      .from('applications')
+      .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate)')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: false })
+    
+    if (dbError) {
+      console.error("Failed to fetch applications:", dbError)
+      setError(dbError.message)
+    } else {
+      setApplications(data || [])
+      setError(null)
+    }
+    setLoading(false)
+  }, [taskId])
+
+  useEffect(() => {
+    if (taskId) fetchApps()
+  }, [taskId, fetchApps])
+
+  return { applications, loading, error, refetch: fetchApps }
+}
