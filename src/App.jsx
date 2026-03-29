@@ -52,12 +52,14 @@ function ProtectedRoute({ children }) {
   }
 
   // 4. Logged in, but profile fetch is in-flight (Spinner)
+  // Ensure we STRICTLY return here if profile is undefined, preventing fallthrough
   if (profile === undefined) {
     return <div className="min-h-screen flex items-center justify-center bg-bg"><LoadingSpinner text="Connecting to profile..." /></div>
   }
 
   // 5. Decision: profile is null (New User) or incomplete row
-  const needsOnboarding = profile === null || !profile.onboarding_completed
+  // We only reach here if profile is explicitly an object or explicitly null.
+  const needsOnboarding = profile === null || profile.onboarding_completed === false
 
   if (needsOnboarding && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />
@@ -66,78 +68,3 @@ function ProtectedRoute({ children }) {
   if (!needsOnboarding && location.pathname === '/onboarding') {
     return <Navigate to="/feed" replace />
   }
-
-  return children
-}
-
-function AppLayout({ children }) {
-  const { user } = useAuth()
-  if (!user) return children
-
-  return (
-    <div className="flex min-h-screen bg-bg">
-      <Sidebar />
-      <div className="flex-1 lg:ml-64 flex flex-col min-h-screen w-full">
-        <Topbar />
-        <main className="flex-1 pb-20 lg:pb-0 relative overflow-x-hidden">
-          {children}
-        </main>
-      </div>
-      <BottomNav />
-    </div>
-  )
-}
-
-function AnimatedRoutes() {
-  const location = useLocation()
-
-  return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
-      >
-        <Routes location={location}>
-          {/* Public */}
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/auth" element={<AuthPage />} />
-
-          {/* Protected */}
-          <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
-          <Route path="/feed" element={<ProtectedRoute><AppLayout><FeedPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/tasks/:id" element={<ProtectedRoute><AppLayout><TaskDetailPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/post-task" element={<ProtectedRoute><AppLayout><PostTaskPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><AppLayout><ProfilePage /></AppLayout></ProtectedRoute>} />
-          <Route path="/profile/:id" element={<ProtectedRoute><AppLayout><ProfilePage /></AppLayout></ProtectedRoute>} />
-          <Route path="/wallet" element={<ProtectedRoute><AppLayout><WalletPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/leaderboard" element={<ProtectedRoute><AppLayout><LeaderboardPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/notifications" element={<ProtectedRoute><AppLayout><NotificationsPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/badges" element={<ProtectedRoute><AppLayout><BadgesPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/admin" element={<ProtectedRoute><AppLayout><AdminPage /></AppLayout></ProtectedRoute>} />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </motion.div>
-    </AnimatePresence>
-  )
-}
-
-export default function App() {
-  return (
-    <BrowserRouter>
-      <ThemeProvider>
-        <ToastProvider>
-          <AuthProvider>
-            <NotificationProvider>
-              <AnimatedRoutes />
-            </NotificationProvider>
-          </AuthProvider>
-        </ToastProvider>
-      </ThemeProvider>
-    </BrowserRouter>
-  )
-}
