@@ -27,6 +27,7 @@ export function AuthProvider({ children }) {
       return fetchPromiseRef.current
     }
 
+<<<<<<< HEAD
     const promise = (async () => {
       try {
         // Add aggressive 8s timeout to prevent infinite suspension on flaky networks
@@ -55,8 +56,21 @@ export function AuthProvider({ children }) {
             }
           }
           return null
+=======
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // PGRST116 means "No rows found" - legitimate new user
+          setProfile(null)
+          profileCacheRef.current = null
+        } else {
+          console.error('[AuthContext] DB error:', error)
+          // Fix: ONLY set error state if we don't already have a valid profile
+          // This prevents kicking active users out if a background refresh fails
+          setProfile(prev => prev ? prev : { error: true, message: error.message })
+>>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
         }
 
+<<<<<<< HEAD
         profileCacheRef.current = data
         setProfile(data)
         return data
@@ -73,11 +87,21 @@ export function AuthProvider({ children }) {
 
     fetchPromiseRef.current = promise
     return promise
+=======
+      profileCacheRef.current = data
+      setProfile(data)
+    } catch (err) {
+      console.error('[AuthContext] Fetch exception:', err)
+      // Apply the same fix in the catch block
+      setProfile(prev => prev ? prev : { error: true, message: err.message })
+    }
+>>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
   }
 
   useEffect(() => {
     let mounted = true
 
+<<<<<<< HEAD
     // Set a fallback timeout for the loading state:
     // If Supabase completely fails to fire INITIAL_SESSION for any reason
     // within 8 seconds, we terminate the loading state.
@@ -145,8 +169,76 @@ export function AuthProvider({ children }) {
       mounted = false
       clearTimeout(fallbackTimeout)
       subscription.unsubscribe()
+=======
+    const initSession = async () => {
+      const timeoutId = setTimeout(() => {
+        if (mounted) {
+          setLoading(false)
+          // Don't wipe profile on timeout — if we have a cache, keep it
+          if (profile === undefined && !profileCacheRef.current) {
+            setProfile(null)
+          }
+        }
+      }, 8000)
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!mounted) return
+
+        if (session?.user) {
+          setUser(session.user)
+          await fetchProfile(session.user.id)
+        } else {
+          setUser(null)
+          setProfile(null)
+          profileCacheRef.current = null
+        }
+      } catch (err) {
+        console.error('[AuthContext] Init error:', err)
+        if (mounted && !profileCacheRef.current) {
+          setUser(null)
+          setProfile(null)
+        }
+      } finally {
+        clearTimeout(timeoutId)
+        if (mounted) setLoading(false)
+      }
     }
-  }, [])
+
+    const initSession = async () => {
+  const timeoutId = setTimeout(() => {
+    if (mounted) {
+      setLoading(false)
+      // Removed the code that sets profile to null here
+      // We don't want to mistakenly log the user out on a slow 3G connection
+>>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
+    }
+  }, 8000)
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!mounted) return
+
+    if (session?.user) {
+      setUser(session.user)
+      await fetchProfile(session.user.id)
+    } else {
+      setUser(null)
+      setProfile(null)
+      profileCacheRef.current = null
+    }
+  } catch (err) {
+    console.error('[AuthContext] Init error:', err)
+    // Only set to null if we don't have a cached profile
+    if (mounted && !profileCacheRef.current) {
+      setUser(null)
+      setProfile(null)
+    }
+  } finally {
+    clearTimeout(timeoutId)
+    if (mounted) setLoading(false)
+  }
+}
 
   const signUp = async (email, password, metadata) => {
     const { data, error } = await supabase.auth.signUp({
@@ -189,6 +281,38 @@ export function AuthProvider({ children }) {
         .eq('id', user.id)
     }
   }
+    const handleLogin = async (e) => {
+  e.preventDefault()
+  
+  // Basic Validation
+  if (!loginEmail.trim() || !loginPassword.trim()) {
+    addToast('Please enter both email and password.', 'error')
+    return
+  }
+  
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(loginEmail)) {
+    addToast('Please enter a valid email address.', 'error')
+    return
+  }
+
+  setLoading(true)
+  
+  try {
+    const { error } = await signIn(loginEmail, loginPassword)
+    if (error) {
+      addToast(error.message, 'error')
+      setLoading(false)
+    } else {
+      addToast('Welcome back!', 'success')
+      // Navigation handled by the useEffect listener on `user`
+    }
+  } catch (err) {
+    console.error('Login error:', err)
+    addToast(err.message || 'An unexpected error occurred.', 'error')
+    setLoading(false)
+  }
+}
 
   return (
     <AuthContext.Provider value={{
