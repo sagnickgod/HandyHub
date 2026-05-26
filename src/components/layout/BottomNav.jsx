@@ -1,10 +1,10 @@
 import { NavLink } from 'react-router-dom'
-import { Home, PlusCircle, Wallet, Trophy, User } from 'lucide-react'
+import { Home, Megaphone, PlusCircle, Trophy, User } from 'lucide-react'
 
 const items = [
   { to: '/feed', icon: Home, label: 'Feed' },
+  { to: '/notices', icon: Megaphone, label: 'Notices' },
   { to: '/post-task', icon: PlusCircle, label: 'Post' },
-  { to: '/wallet', icon: Wallet, label: 'Wallet' },
   { to: '/leaderboard', icon: Trophy, label: 'Board' },
   { to: '/profile', icon: User, label: 'Profile' },
 ]
@@ -22,7 +22,7 @@ export default function BottomNav() {
               ${isActive ? 'text-primary scale-110 drop-shadow-[0_0_8px_rgba(124,111,247,0.5)]' : 'text-text-muted hover:text-white'}`
             }
           >
-            <item.icon size={22} strokeWidth={isActive => isActive ? 2.5 : 1.5} />
+            <item.icon size={22} />
             <span>{item.label}</span>
           </NavLink>
         ))}

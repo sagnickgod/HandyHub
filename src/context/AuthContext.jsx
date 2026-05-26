@@ -6,94 +6,103 @@ const AuthContext = createContext({})
 export const useAuth = () => useContext(AuthContext)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState(undefined)   // undefined = not yet determined
   const [profile, setProfile] = useState(undefined)
   const [loading, setLoading] = useState(true)
+
   // Cache the profile to avoid re-fetching on every tab-switch / TOKEN_REFRESHED event
   const profileCacheRef = useRef(null)
+  // Dedup concurrent fetchProfile calls
+  const fetchPromiseRef = useRef(null)
 
   const fetchProfile = async (userId, force = false) => {
-    // If we have a cached profile and this isn't a forced refresh, return early
+    // Return cached profile immediately (no unnecessary DB call)
     if (!force && profileCacheRef.current && profileCacheRef.current.id === userId) {
       setProfile(profileCacheRef.current)
-      return
+      return profileCacheRef.current
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
+    // Deduplicate concurrent requests — wait for the one already in-flight
+    if (fetchPromiseRef.current) {
+      return fetchPromiseRef.current
+    }
 
-      if (error) {
-        if (error.code === 'PGRST116') {
-          setProfile(null)
-          profileCacheRef.current = null
-        } else {
-          console.error('[AuthContext] DB error:', error)
-          // Don't overwrite a good cached profile with an error state
-          if (!profileCacheRef.current) {
-            setProfile({ error: true, message: error.message })
+    const promise = (async () => {
+      try {
+        // Add aggressive 8s timeout to prevent infinite suspension on flaky networks
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Supabase query took too long to resolve')), 8000)
+        )
+        
+        const dbQuery = supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single()
+
+        const { data, error } = await Promise.race([dbQuery, timeoutPromise])
+
+        if (error) {
+          if (error.code === 'PGRST116') {
+            // Profile row does not exist yet → send to onboarding
+            setProfile(null)
+            profileCacheRef.current = null
+          } else {
+            console.error('[AuthContext] fetchProfile DB error:', error)
+            // Network/DB error — keep any existing cached profile so the user isn't locked out
+            if (!profileCacheRef.current) {
+              setProfile({ error: true, message: error.message || 'Could not load your profile' })
+            }
           }
+          return null
         }
-        return
-      }
 
-      profileCacheRef.current = data
-      setProfile(data)
-    } catch (err) {
-      console.error('[AuthContext] Fetch exception:', err)
-      if (!profileCacheRef.current) {
-        setProfile({ error: true, message: err.message })
+        profileCacheRef.current = data
+        setProfile(data)
+        return data
+      } catch (err) {
+        console.error('[AuthContext] fetchProfile exception:', err)
+        if (!profileCacheRef.current) {
+          setProfile({ error: true, message: err.message || 'Network timeout: Database did not respond.' })
+        }
+        return null
+      } finally {
+        fetchPromiseRef.current = null
       }
-    }
+    })()
+
+    fetchPromiseRef.current = promise
+    return promise
   }
 
   useEffect(() => {
     let mounted = true
 
-    const initSession = async () => {
-      const timeoutId = setTimeout(() => {
-        if (mounted) {
-          setLoading(false)
-          // Don't wipe profile on timeout — if we have a cache, keep it
-          if (profile === undefined && !profileCacheRef.current) {
-            setProfile(null)
-          }
-        }
-      }, 8000)
-
-      try {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!mounted) return
-
-        if (session?.user) {
-          setUser(session.user)
-          await fetchProfile(session.user.id)
-        } else {
-          setUser(null)
-          setProfile(null)
-          profileCacheRef.current = null
-        }
-      } catch (err) {
-        console.error('[AuthContext] Init error:', err)
-        if (mounted && !profileCacheRef.current) {
-          setUser(null)
-          setProfile(null)
-        }
-      } finally {
-        clearTimeout(timeoutId)
-        if (mounted) setLoading(false)
-      }
-    }
-
-    initSession()
+    // Set a fallback timeout for the loading state:
+    // If Supabase completely fails to fire INITIAL_SESSION for any reason
+    // within 8 seconds, we terminate the loading state.
+    const fallbackTimeout = setTimeout(() => {
+      if (mounted) setLoading(false)
+    }, 8000)
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return
-        console.log('[AuthContext] Event:', event)
+        console.log('[AuthContext] event:', event, '| user:', session?.user?.id ?? 'none')
+
+        if (event === 'INITIAL_SESSION') {
+          clearTimeout(fallbackTimeout)
+          if (session?.user) {
+            setUser(session.user)
+            await fetchProfile(session.user.id)
+          } else {
+            setUser(null)
+            setProfile(null)
+            profileCacheRef.current = null
+          }
+          if (mounted) setLoading(false)
+          return
+        }
 
         if (event === 'SIGNED_OUT') {
           setUser(null)
@@ -103,29 +112,38 @@ export function AuthProvider({ children }) {
           return
         }
 
-        if (event === 'INITIAL_SESSION') {
-          // Handled by initSession above, skip
+        if (event === 'SIGNED_IN') {
+          if (session?.user) {
+            setUser(session.user)
+            const isSameUser = profileCacheRef.current?.id === session.user.id
+            if (!isSameUser) {
+              profileCacheRef.current = null
+              setProfile(undefined)
+            }
+            await fetchProfile(session.user.id, !isSameUser)
+          }
+          if (mounted) setLoading(false)
           return
         }
 
-        if (session?.user) {
-          setUser(session.user)
-
-          if (event === 'SIGNED_IN') {
-            // Fresh login — force a real fetch, ignore any stale cache
-            profileCacheRef.current = null
-            setProfile(undefined)
-            await fetchProfile(session.user.id, true)
-          } else if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
-            // Tab switch or token refresh — re-use cache, don't show spinner
+        if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          if (session?.user) {
+            setUser(session.user)
             await fetchProfile(session.user.id, false)
           }
+          if (mounted) setLoading(false)
+          return
         }
       }
     )
 
+    // Trigger a manual getSession strictly to kickstart the onAuthStateChange listener
+    // in older/flaky Supabase versions, but WE DONT RELY ON ITS RESULT.
+    supabase.auth.getSession().catch(() => {})
+
     return () => {
       mounted = false
+      clearTimeout(fallbackTimeout)
       subscription.unsubscribe()
     }
   }, [])
@@ -149,6 +167,7 @@ export function AuthProvider({ children }) {
 
   const signOut = async () => {
     profileCacheRef.current = null
+    fetchPromiseRef.current = null
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
@@ -157,6 +176,7 @@ export function AuthProvider({ children }) {
   const refreshProfile = async () => {
     if (user) {
       profileCacheRef.current = null
+      fetchPromiseRef.current = null
       await fetchProfile(user.id, true)
     }
   }

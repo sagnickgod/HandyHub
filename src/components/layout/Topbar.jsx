@@ -14,12 +14,12 @@ export default function Topbar() {
       <div className="flex items-center justify-between px-4 lg:px-8 h-full">
         {/* Left Side: Mobile Logo / Desktop empty or breadcrumbs */}
         <div className="flex items-center gap-3 lg:hidden">
-          <div 
-            className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm cursor-pointer" 
+          <img 
+            src="/icon.svg" 
+            alt="HandyHub Icon" 
+            className="w-10 h-10 object-contain cursor-pointer drop-shadow-md lg:hidden" 
             onClick={() => navigate('/feed')}
-          >
-            H
-          </div>
+          />
           <span className="font-heading text-lg font-bold text-text">HandyHub</span>
         </div>
         <div className="hidden lg:block bg-surface-2/50 px-3 py-1 rounded-full text-xs font-semibold text-text-muted border border-border">

@@ -1,17 +1,29 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { Edit3, Save, X } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Edit3, Save, X, MapPin, GraduationCap, Clock, Star, Camera, ArrowLeftRight, CheckCircle, Shield } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useProfile, useUserBadges } from '../hooks/useProfile'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../components/ui/Toast'
+import { LevelBadge, getLevelProgress, getLevelInfo } from '../lib/levels'
+import { calculateProfileScore, PROFILE_SCORE_ITEMS } from '../lib/profileCompletion'
 import PointsDisplay from '../components/ui/PointsDisplay'
 import ReputationStars from '../components/ui/ReputationStars'
 import StreakCounter from '../components/ui/StreakCounter'
 import CategoryChip from '../components/ui/CategoryChip'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import EmptyState from '../components/ui/EmptyState'
+
+const CATEGORY_COLORS = {
+  coding:   '#7C6FF7', study: '#38BDF8', tech: '#FBBF24',
+  physical: '#FB923C', event: '#34D399', creative: '#F472B6', other: '#94A3B8'
+}
+
+const inputStyle = {
+  width: '100%', padding: '12px 16px', fontSize: 14, color: '#fff', outline: 'none',
+  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, transition: 'all 0.2s'
+}
 
 export default function ProfilePage() {
   const { id } = useParams()
@@ -31,16 +43,74 @@ export default function ProfilePage() {
   const [availability, setAvailability] = useState('anytime')
   const [tasks, setTasks] = useState([])
   const [ratings, setRatings] = useState([])
+  const [ratingStats, setRatingStats] = useState({ avg: 0, total: 0 })
   const [bookmarks, setBookmarks] = useState([])
   const [saving, setSaving] = useState(false)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [totalPointsEarned, setTotalPointsEarned] = useState(0)
+  const [verifiedSkills, setVerifiedSkills] = useState([])
+  const [completedSwaps, setCompletedSwaps] = useState([])
+  const [profileStats, setProfileStats] = useState({ tasksPosted: 0, tasksHelped: 0, ratingsReceived: 0 })
+  const [showSwapModal, setShowSwapModal] = useState(false)
+  const [swapForm, setSwapForm] = useState({ offers: '', wants: '', message: '' })
+  const [showVouchModal, setShowVouchModal] = useState(null)
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
-    if (profile) {
-      setBio(profile.bio || '')
-      setSkills(profile.skills || [])
-      setAvailability(profile.availability || 'anytime')
-    }
+    if (profile) { setBio(profile.bio || ''); setSkills(profile.skills || []); setAvailability(profile.availability || 'anytime') }
   }, [profile])
+
+  // Fetch rating stats
+  useEffect(() => {
+    if (!targetId) return
+    supabase.from('ratings').select('score').eq('ratee_id', targetId)
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          const avg = data.reduce((s, r) => s + r.score, 0) / data.length
+          setRatingStats({ avg: avg.toFixed(1), total: data.length })
+          setProfileStats(prev => ({ ...prev, ratingsReceived: data.length }))
+        } else {
+          setRatingStats({ avg: 0, total: 0 })
+        }
+      })
+  }, [targetId])
+
+  // Fetch total lifetime points earned
+  useEffect(() => {
+    if (!targetId) return
+    supabase.from('point_transactions').select('amount').eq('user_id', targetId).in('type', ['earn', 'bonus'])
+      .then(({ data }) => {
+        const total = (data || []).reduce((s, t) => s + t.amount, 0)
+        setTotalPointsEarned(total)
+      })
+  }, [targetId])
+
+  // Fetch verified skills
+  useEffect(() => {
+    if (!targetId) return
+    supabase.from('skill_verifications').select('skill, verified_by').eq('user_id', targetId)
+      .then(({ data }) => setVerifiedSkills(data || []))
+  }, [targetId])
+
+  // Fetch completed swaps
+  useEffect(() => {
+    if (!targetId) return
+    supabase.from('skill_swaps').select('requester_offers, requester_wants')
+      .or(`requester_id.eq.${targetId},receiver_id.eq.${targetId}`)
+      .eq('status', 'completed')
+      .then(({ data }) => setCompletedSwaps(data || []))
+  }, [targetId])
+
+  // Fetch profile completion stats
+  useEffect(() => {
+    if (!targetId || !isOwn) return
+    Promise.all([
+      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('poster_id', targetId),
+      supabase.from('tasks').select('id', { count: 'exact', head: true }).eq('selected_helper_id', targetId).eq('state', 'completed'),
+    ]).then(([posted, helped]) => {
+      setProfileStats(prev => ({ ...prev, tasksPosted: posted.count || 0, tasksHelped: helped.count || 0 }))
+    })
+  }, [targetId, isOwn])
 
   useEffect(() => {
     if (!targetId) return
@@ -51,13 +121,11 @@ export default function ProfilePage() {
         .then(({ data }) => setTasks(data || []))
     } else if (tab === 'posted') {
       supabase.from('tasks').select('id, title, state, points_offered, created_at, category')
-        .eq('poster_id', targetId)
-        .order('created_at', { ascending: false }).limit(20)
+        .eq('poster_id', targetId).order('created_at', { ascending: false }).limit(20)
         .then(({ data }) => setTasks(data || []))
     } else if (tab === 'reviews') {
-      supabase.from('ratings').select('*, rater:profiles!rater_id(full_name)')
-        .eq('ratee_id', targetId)
-        .order('created_at', { ascending: false }).limit(20)
+      supabase.from('ratings').select('*, rater:profiles!rater_id(full_name), task:tasks!task_id(title)')
+        .eq('ratee_id', targetId).order('created_at', { ascending: false }).limit(20)
         .then(({ data }) => setRatings(data || []))
     } else if (tab === 'saved' && isOwn) {
       const saved = JSON.parse(localStorage.getItem('handyhub-bookmarks') || '[]')
@@ -71,170 +139,468 @@ export default function ProfilePage() {
     await refreshProfile()
     setEditing(false)
     addToast('Profile updated!', 'success')
-    setSaving(false)
+    setSaving(false); refetch()
+  }
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) return addToast('Max 5MB', 'error')
+    setUploadingAvatar(true)
+    const ext = file.name.split('.').pop()
+    const path = `${user.id}/avatar.${ext}`
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { upsert: true })
+    if (uploadError) { addToast(uploadError.message, 'error'); setUploadingAvatar(false); return }
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
+    await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id)
+    await refreshProfile()
     refetch()
+    addToast('Profile photo updated!', 'success')
+    setUploadingAvatar(false)
   }
 
-  const toggleSkill = (s) => {
-    setSkills(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
+  const handleVouch = async (skill) => {
+    const { error } = await supabase.from('skill_verifications').insert({ user_id: targetId, skill, verified_by: user.id })
+    if (error) {
+      if (error.message.includes('duplicate')) addToast('Already vouched for this skill!', 'error')
+      else addToast(error.message, 'error')
+    } else {
+      addToast(`Vouched for ${skill}! ✅`, 'success')
+      // Send notification
+      await supabase.from('notifications').insert({ user_id: targetId, type: 'vouch', message: `🎉 ${myProfile?.full_name} vouched for your ${skill} skill!`, link: `/profile/${user.id}` }).catch(() => {})
+      setVerifiedSkills(prev => [...prev, { skill, verified_by: user.id }])
+    }
   }
 
-  // Online presence
+  const handleProposeSwap = async () => {
+    if (!swapForm.offers.trim() || !swapForm.wants.trim()) return addToast('Fill in what you offer and want', 'error')
+    const { error } = await supabase.from('skill_swaps').insert({
+      requester_id: user.id, receiver_id: targetId,
+      requester_offers: swapForm.offers.trim(), requester_wants: swapForm.wants.trim(),
+      message: swapForm.message.trim(),
+    })
+    if (error) addToast(error.message, 'error')
+    else { addToast('Swap proposed! 🔄', 'success'); setShowSwapModal(false); setSwapForm({ offers: '', wants: '', message: '' }) }
+  }
+
+  const toggleSkill = (s) => setSkills(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
   const isOnline = profile?.last_active_date === new Date().toISOString().split('T')[0]
 
   if (loading) return <LoadingSpinner text="Loading profile..." />
   if (!profile) return <EmptyState title="Profile not found" />
 
+  const levelProgress = getLevelProgress(totalPointsEarned)
+  const myLevel = getLevelInfo(myProfile?.points_earned || totalPointsEarned)
+  const profileScore = isOwn ? calculateProfileScore(profile, profileStats) : null
+  const isSkillVerified = (skill) => verifiedSkills.some(v => v.skill === skill)
+  const canVouch = !isOwn && myLevel.level >= 5
+
+  const STATS = [
+    { label: 'Balance',    content: <PointsDisplay amount={profile.points_balance} size="sm" /> },
+    { label: 'Rating',     content: (
+      <div className="flex items-center gap-1">
+        <Star size={13} className="text-amber-400 fill-amber-400" />
+        <span className="text-amber-400 font-black text-sm">{ratingStats.avg > 0 ? ratingStats.avg : '—'}</span>
+        <span className="text-white/25 text-[10px]">({ratingStats.total})</span>
+      </div>
+    )},
+    { label: 'Done',       content: <span className="text-emerald-400 font-black text-sm">{Number(profile.completion_rate || 0).toFixed(0)}%</span> },
+    { label: 'Streak',     content: <StreakCounter count={profile.streak_count || 0} longest={profile.longest_streak || 0} /> },
+  ]
+
+  const TABS = [
+    { key: 'helped', label: 'Helped' },
+    { key: 'posted', label: 'Posted' },
+    { key: 'reviews', label: 'Reviews' },
+    ...(isOwn ? [{ key: 'saved', label: 'Saved' }] : [])
+  ]
+
   return (
-    <div className="min-h-screen pb-20 lg:pb-0">
-      <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="min-h-screen pb-28 lg:pb-10" style={{ background: '#0A0A0F' }}>
+      {/* Ambient */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 h-48 opacity-30"
+          style={{ background: 'linear-gradient(180deg, rgba(124,111,247,0.08), transparent)' }} />
+      </div>
+
+      <div className="relative max-w-3xl mx-auto px-4 pt-6 lg:pt-8">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-          {/* Hero */}
-          <div className="glass-card overflow-hidden mb-6">
-            <div className="h-24 bg-gradient-to-r from-primary/30 to-accent/20" />
-            <div className="px-6 pb-6 -mt-8">
-              <div className="flex items-end gap-4 mb-4">
-                <div className="relative">
-                  <div className="w-16 h-16 rounded-2xl bg-primary/20 flex items-center justify-center text-primary font-bold text-2xl border-4 border-surface">
-                    {profile.full_name?.[0]}
+
+          {/* Profile Completion Score (own profile only) */}
+          {isOwn && profileScore && !profileScore.isComplete && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+              className="mb-5 p-5 rounded-3xl" style={{ background: '#17171D', border: '1px solid rgba(124,111,247,0.15)' }}>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-white/70 font-bold text-sm">Your profile is {profileScore.score}% complete</span>
+                <span className="text-xs font-black" style={{ color: '#7C6FF7' }}>{profileScore.score}%</span>
+              </div>
+              <div className="w-full h-2 rounded-full mb-3" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <motion.div className="h-full rounded-full" initial={{ width: 0 }} animate={{ width: `${profileScore.score}%` }}
+                  transition={{ duration: 0.8, ease: 'easeOut' }}
+                  style={{ background: `linear-gradient(90deg, #7C6FF7, ${profileScore.score > 60 ? '#34D399' : '#38BDF8'})` }} />
+              </div>
+              <div className="space-y-1.5">
+                {profileScore.incomplete.slice(0, 3).map(item => (
+                  <div key={item.key} className="flex items-center gap-2 text-xs text-white/35">
+                    <span className="w-1 h-1 rounded-full bg-violet-400/50" />
+                    {item.label}
+                    <span className="text-violet-400/50 ml-auto text-[10px]">+{item.points}%</span>
                   </div>
-                  {isOnline && <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-accent-2 border-2 border-surface" />}
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Hero card */}
+          <div className="relative overflow-hidden rounded-3xl mb-5"
+            style={{ background: 'linear-gradient(135deg, #17171D, #13131A)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            {/* Banner */}
+            <div className="h-28 relative overflow-hidden"
+              style={{ background: 'linear-gradient(135deg, rgba(124,111,247,0.25), rgba(99,102,241,0.15), rgba(56,189,248,0.1))' }}>
+              <div className="absolute inset-0 backdrop-blur-sm" />
+              <div className="absolute inset-0 opacity-10"
+                style={{ backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.5) 0px, transparent 1px, transparent 32px), repeating-linear-gradient(90deg, rgba(255,255,255,0.5) 0px, transparent 1px, transparent 32px)' }} />
+            </div>
+
+            <div className="px-6 pb-6 -mt-10 relative">
+              <div className="flex items-end gap-4 mb-5">
+                {/* Avatar with upload */}
+                <div className="relative group">
+                  <div className="w-20 h-20 rounded-2xl flex items-center justify-center text-3xl font-black text-white border-4 overflow-hidden"
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(124,111,247,0.3), rgba(99,102,241,0.2))',
+                      borderColor: '#13131A',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.4)'
+                    }}>
+                    {profile.avatar_url
+                      ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                      : <span style={{ textShadow: '0 2px 8px rgba(0,0,0,0.4)' }}>{profile.full_name?.[0]}</span>
+                    }
+                  </div>
+                  {isOwn && (
+                    <button onClick={() => fileInputRef.current?.click()}
+                      className="absolute inset-0 rounded-2xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      style={{ background: 'rgba(0,0,0,0.5)' }}>
+                      {uploadingAvatar ? <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <Camera size={20} className="text-white/80" />}
+                    </button>
+                  )}
+                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                  {isOnline && (
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 flex items-center justify-center"
+                      style={{ background: '#10B981', borderColor: '#13131A', boxShadow: '0 0 8px rgba(16,185,129,0.5)' }} />
+                  )}
                 </div>
-                <div className="flex-1">
-                  <h1 className="font-heading text-xl font-bold">{profile.full_name}</h1>
-                  <p className="text-sm text-text-muted">@{profile.username} · {profile.course || ''} {profile.year ? `Y${profile.year}` : ''}</p>
+
+                <div className="flex-1 pb-1">
+                  <div className="flex items-center gap-2">
+                    <h1 className="font-heading text-xl font-black text-white">{profile.full_name}</h1>
+                    <LevelBadge level={levelProgress.current.level} size="sm" />
+                  </div>
+                  <p className="text-white/40 text-sm">@{profile.username}</p>
+                  <p className="text-xs mt-0.5" style={{ color: levelProgress.current.color }}>
+                    {levelProgress.current.title}
+                  </p>
                 </div>
-                {isOwn && !editing && (
-                  <button onClick={() => setEditing(true)} className="text-text-muted hover:text-primary transition-colors">
-                    <Edit3 size={18} />
-                  </button>
+
+                {isOwn && !editing ? (
+                  <motion.button
+                    onClick={() => setEditing(true)}
+                    whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }}
+                    className="p-2.5 rounded-xl transition-all"
+                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+                  >
+                    <Edit3 size={15} className="text-white/45" />
+                  </motion.button>
+                ) : !isOwn && (
+                  <motion.button
+                    onClick={() => setShowSwapModal(true)}
+                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                    className="px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5"
+                    style={{ background: 'rgba(236,72,153,0.1)', color: '#EC4899', border: '1px solid rgba(236,72,153,0.25)' }}>
+                    <ArrowLeftRight size={13} /> Propose Swap
+                  </motion.button>
                 )}
               </div>
 
-              {editing ? (
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm text-text-muted mb-1 block">Bio ({bio.length}/160)</label>
-                    <textarea value={bio} onChange={e => e.target.value.length <= 160 && setBio(e.target.value)} rows={2} className="resize-none" />
+              {/* Meta info */}
+              <div className="flex flex-wrap gap-3 mb-4">
+                {profile.course && (
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                    <GraduationCap size={12} />
+                    {profile.course} {profile.year ? `• Y${profile.year}` : ''}
                   </div>
-                  <div>
-                    <label className="text-sm text-text-muted mb-1 block">Skills</label>
-                    <div className="flex flex-wrap gap-2">
-                      {['coding','study','tech','physical','event','creative'].map(s => (
-                        <CategoryChip key={s} category={s} selected={skills.includes(s)} onClick={() => toggleSkill(s)} />
+                )}
+                {profile.availability && (
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                    <Clock size={12} />
+                    Available {profile.availability}
+                  </div>
+                )}
+              </div>
+
+              {/* XP Progress Bar */}
+              <div className="mb-4 p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                <div className="flex items-center justify-between text-[10px] mb-1.5">
+                  <span className="text-white/40">Level {levelProgress.current.level} — {levelProgress.current.title}</span>
+                  {levelProgress.next && (
+                    <span className="text-white/25">{totalPointsEarned} / {levelProgress.next.minPoints} pts</span>
+                  )}
+                </div>
+                <div className="w-full h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                  <motion.div className="h-full rounded-full"
+                    initial={{ width: 0 }} animate={{ width: `${levelProgress.progress}%` }}
+                    transition={{ duration: 1, ease: 'easeOut' }}
+                    style={{ background: `linear-gradient(90deg, ${levelProgress.current.color}, ${levelProgress.next?.color || levelProgress.current.color})` }} />
+                </div>
+                {levelProgress.next && (
+                  <p className="text-[10px] text-white/20 mt-1">Next: {levelProgress.next.title}</p>
+                )}
+              </div>
+
+              {/* Edit form or bio+skills view */}
+              <AnimatePresence mode="wait">
+                {editing ? (
+                  <motion.div key="edit" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">Bio ({bio.length}/160)</label>
+                      <textarea value={bio} onChange={e => e.target.value.length <= 160 && setBio(e.target.value)} rows={2}
+                        style={{ ...inputStyle, resize: 'none' }}
+                        onFocus={e => { e.target.style.border = '1px solid rgba(124,111,247,0.4)'; e.target.style.boxShadow = '0 0 0 3px rgba(124,111,247,0.08)' }}
+                        onBlur={e => { e.target.style.border = '1px solid rgba(255,255,255,0.08)'; e.target.style.boxShadow = 'none' }} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">Skills</label>
+                      <div className="flex flex-wrap gap-2">
+                        {['coding','study','tech','physical','event','creative'].map(s => (
+                          <button key={s} type="button" onClick={() => toggleSkill(s)}
+                            className="px-3 py-1.5 rounded-xl text-xs font-black uppercase transition-all capitalize"
+                            style={{
+                              background: skills.includes(s) ? `${CATEGORY_COLORS[s] || '#7C6FF7'}20` : 'rgba(255,255,255,0.04)',
+                              border: skills.includes(s) ? `1px solid ${CATEGORY_COLORS[s] || '#7C6FF7'}40` : '1px solid rgba(255,255,255,0.07)',
+                              color: skills.includes(s) ? CATEGORY_COLORS[s] || '#7C6FF7' : 'rgba(255,255,255,0.3)'
+                            }}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      {['morning','evening','anytime'].map(a => (
+                        <button key={a} onClick={() => setAvailability(a)} type="button"
+                          className="flex-1 py-2.5 rounded-xl text-xs font-bold capitalize transition-all"
+                          style={{
+                            background: availability === a ? 'rgba(124,111,247,0.2)' : 'rgba(255,255,255,0.04)',
+                            border: availability === a ? '1px solid rgba(124,111,247,0.4)' : '1px solid rgba(255,255,255,0.07)',
+                            color: availability === a ? '#7C6FF7' : 'rgba(255,255,255,0.35)'
+                          }}>{a}</button>
                       ))}
                     </div>
-                  </div>
-                  <div className="flex gap-3">
-                    {['morning','evening','anytime'].map(a => (
-                      <button key={a} onClick={() => setAvailability(a)}
-                        className={`flex-1 py-2 rounded-lg text-sm capitalize ${availability === a ? 'bg-primary text-white' : 'bg-surface-2 text-text-muted'}`}>
-                        {a}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-3">
-                    <button onClick={() => setEditing(false)} className="flex-1 bg-surface-2 text-text py-2 rounded-lg btn-press"><X size={16} className="inline mr-1" />Cancel</button>
-                    <button onClick={handleSave} disabled={saving} className="flex-1 bg-primary text-white py-2 rounded-lg btn-press"><Save size={16} className="inline mr-1" />Save</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {profile.bio && <p className="text-sm text-text-muted mb-3">{profile.bio}</p>}
-                  {profile.skills?.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      {profile.skills.map(s => <CategoryChip key={s} category={s} />)}
+                    <div className="flex gap-2">
+                      <motion.button onClick={() => setEditing(false)} whileTap={{ scale: 0.97 }}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-1.5"
+                        style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <X size={14} />Cancel
+                      </motion.button>
+                      <motion.button onClick={handleSave} disabled={saving} whileTap={{ scale: 0.97 }}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-1.5"
+                        style={{ background: 'linear-gradient(135deg, #7C6FF7, #5B52E5)', boxShadow: '0 4px 16px rgba(124,111,247,0.3)' }}>
+                        <Save size={14} />{saving ? 'Saving...' : 'Save'}
+                      </motion.button>
                     </div>
-                  )}
-                </>
-              )}
+                  </motion.div>
+                ) : (
+                  <motion.div key="view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                    {profile.bio && <p className="text-white/45 text-sm mb-3 leading-relaxed">{profile.bio}</p>}
+                    {profile.skills?.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {profile.skills.map(s => (
+                          <div key={s} className="flex items-center gap-1">
+                            <span className="px-2.5 py-1 rounded-lg text-[11px] font-black uppercase tracking-wider capitalize flex items-center gap-1"
+                              style={{ background: `${CATEGORY_COLORS[s] || '#7C6FF7'}15`, border: `1px solid ${CATEGORY_COLORS[s] || '#7C6FF7'}25`, color: CATEGORY_COLORS[s] || '#7C6FF7' }}>
+                              {isSkillVerified(s) && <CheckCircle size={10} className="text-emerald-400" />}
+                              {s}
+                            </span>
+                            {canVouch && !isSkillVerified(s) && (
+                              <button onClick={() => handleVouch(s)}
+                                className="text-[9px] text-emerald-400/60 hover:text-emerald-400 transition-colors font-bold">
+                                Vouch ✅
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-4 gap-3 mb-6">
-            {[
-              { label: 'Points', value: <PointsDisplay amount={profile.points_balance} size="sm" /> },
-              { label: 'Reputation', value: <ReputationStars score={profile.reputation_score} /> },
-              { label: 'Completion', value: <span className="text-accent-2 font-bold">{Number(profile.completion_rate || 0).toFixed(0)}%</span> },
-              { label: 'Streak', value: <StreakCounter count={profile.streak_count || 0} longest={profile.longest_streak || 0} /> },
-            ].map(s => (
-              <div key={s.label} className="glass-card p-3 text-center">
-                <p className="text-xs text-text-muted mb-1">{s.label}</p>
-                {s.value}
-              </div>
+          <div className="grid grid-cols-4 gap-3 mb-5">
+            {STATS.map((s, i) => (
+              <motion.div
+                key={s.label}
+                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                className="text-center p-3.5 rounded-2xl"
+                style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.05)' }}
+              >
+                <p className="text-white/25 text-[9px] uppercase tracking-[0.12em] mb-1.5">{s.label}</p>
+                {s.content}
+              </motion.div>
             ))}
           </div>
 
-          {/* Badge shelf */}
+          {/* Badges */}
           {badges.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-semibold text-text-muted mb-2">Badges</h3>
-              <div className="flex gap-3 overflow-x-auto pb-2">
+            <div className="mb-5 p-5 rounded-3xl" style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <h3 className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 mb-3">Badges</h3>
+              <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
                 {badges.map(ub => (
-                  <div key={ub.id} className="flex flex-col items-center gap-1 min-w-[60px]">
-                    <span className="text-2xl">{ub.badges?.icon}</span>
-                    <span className="text-xs text-text-muted text-center">{ub.badges?.name}</span>
+                  <div key={ub.id} className="flex flex-col items-center gap-1.5 min-w-[56px] group">
+                    <span className="text-2xl transition-transform group-hover:scale-125"
+                      style={{ filter: `drop-shadow(0 0 8px ${ub.badges?.color || '#7C6FF7'}80)` }}>
+                      {ub.badges?.icon}
+                    </span>
+                    <span className="text-[10px] text-white/30 text-center leading-tight">{ub.badges?.name}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
+          {/* Skill Swaps */}
+          {completedSwaps.length > 0 && (
+            <div className="mb-5 p-5 rounded-3xl" style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <h3 className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 mb-3">🔄 Skill Swaps ({completedSwaps.length})</h3>
+              <div className="flex flex-wrap gap-2">
+                {completedSwaps.map((sw, i) => (
+                  <span key={i} className="px-2.5 py-1 rounded-lg text-[11px] font-bold"
+                    style={{ background: 'rgba(236,72,153,0.1)', color: '#EC4899', border: '1px solid rgba(236,72,153,0.2)' }}>
+                    {sw.requester_offers} ↔ {sw.requester_wants}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Tabs */}
-          <div className="flex gap-1 bg-surface-2 rounded-xl p-1 mb-4">
-            {[
-              { key: 'helped', label: 'Helped' },
-              { key: 'posted', label: 'Posted' },
-              { key: 'reviews', label: 'Reviews' },
-              ...(isOwn ? [{ key: 'saved', label: 'Saved' }] : [])
-            ].map(t => (
+          <div className="flex gap-1 p-1 rounded-2xl mb-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
+            {TABS.map(t => (
               <button key={t.key} onClick={() => setTab(t.key)}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.key ? 'bg-primary text-white' : 'text-text-muted'}`}>
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all"
+                style={{
+                  background: tab === t.key ? 'linear-gradient(135deg, #7C6FF7, #5B52E5)' : 'transparent',
+                  color: tab === t.key ? '#fff' : 'rgba(255,255,255,0.35)',
+                  boxShadow: tab === t.key ? '0 4px 12px rgba(124,111,247,0.25)' : 'none'
+                }}>
                 {t.label}
               </button>
             ))}
           </div>
 
           {/* Tab content */}
-          {(tab === 'helped' || tab === 'posted') && (
-            <div className="space-y-2">
-              {tasks.length === 0 ? (
-                <p className="text-center text-text-muted text-sm py-8">No tasks yet</p>
-              ) : tasks.map(t => (
-                <div key={t.id} onClick={() => navigate(`/tasks/${t.id}`)} className="glass-card p-3 flex items-center gap-3 cursor-pointer card-hover">
-                  <CategoryChip category={t.category} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{t.title}</p>
-                    <span className={`text-xs ${t.state === 'completed' ? 'text-accent-2' : 'text-text-muted'}`}>{t.state}</span>
-                  </div>
-                  <PointsDisplay amount={t.points_offered} size="sm" />
-                </div>
-              ))}
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {(tab === 'helped' || tab === 'posted') && (
+              <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-2">
+                {tasks.length === 0 ? (
+                  <p className="text-center text-white/25 text-sm py-10">No tasks yet</p>
+                ) : tasks.map((t, i) => (
+                  <motion.div
+                    key={t.id}
+                    initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}
+                    onClick={() => navigate(`/tasks/${t.id}`)}
+                    className="flex items-center gap-3 p-4 rounded-2xl cursor-pointer transition-all group"
+                    style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.05)' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#1C1C26'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#17171D'}
+                  >
+                    <span className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ background: CATEGORY_COLORS[t.category] || '#7C6FF7' }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white/75 text-sm font-semibold truncate">{t.title}</p>
+                      <span className="text-xs capitalize" style={{ color: t.state === 'completed' ? '#34D399' : 'rgba(255,255,255,0.3)' }}>{t.state}</span>
+                    </div>
+                    <PointsDisplay amount={t.points_offered} size="sm" />
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
 
-          {tab === 'reviews' && (
-            <div className="space-y-3">
-              {ratings.length === 0 ? (
-                <p className="text-center text-text-muted text-sm py-8">No reviews yet</p>
-              ) : ratings.map(r => (
-                <div key={r.id} className="glass-card p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <ReputationStars score={r.score} />
-                    <span className="text-xs text-text-muted">by {r.rater?.full_name}</span>
-                  </div>
-                  {r.comment && <p className="text-sm text-text-muted">{r.comment}</p>}
-                </div>
-              ))}
-            </div>
-          )}
+            {tab === 'reviews' && (
+              <motion.div key="reviews" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
+                {ratings.length === 0 ? (
+                  <p className="text-center text-white/25 text-sm py-10">No reviews yet</p>
+                ) : ratings.map((r, i) => (
+                  <motion.div key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.05 }}
+                    className="p-4 rounded-2xl" style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-0.5">
+                        {[1,2,3,4,5].map(s => (
+                          <Star key={s} size={12} className={s <= r.score ? 'text-amber-400 fill-amber-400' : 'text-white/15'} />
+                        ))}
+                      </div>
+                      <span className="text-xs text-white/30">by {r.rater?.full_name}</span>
+                    </div>
+                    {r.task?.title && (
+                      <p className="text-[10px] text-violet-400/60 mb-1">📋 {r.task.title}</p>
+                    )}
+                    {r.comment && <p className="text-sm text-white/45 leading-relaxed">{r.comment}</p>}
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
 
-          {tab === 'saved' && (
-            <p className="text-center text-text-muted text-sm py-8">Bookmarks saved locally. {bookmarks.length} saved.</p>
-          )}
+            {tab === 'saved' && (
+              <motion.div key="saved" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                <p className="text-center text-white/25 text-sm py-10">
+                  {bookmarks.length} task{bookmarks.length !== 1 ? 's' : ''} bookmarked locally.
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       </div>
+
+      {/* Skill Swap Proposal Modal */}
+      <AnimatePresence>
+        {showSwapModal && (
+          <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSwapModal(false)} />
+            <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+              className="relative w-full max-w-md rounded-3xl p-6 z-10"
+              style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-white font-bold text-lg">🔄 Propose Skill Swap</h2>
+                <button onClick={() => setShowSwapModal(false)} className="text-white/40 hover:text-white"><X size={20} /></button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">I'll offer</label>
+                  <input value={swapForm.offers} onChange={e => setSwapForm(p => ({ ...p, offers: e.target.value }))}
+                    placeholder="e.g. Python tutoring" style={inputStyle} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">In exchange for</label>
+                  <input value={swapForm.wants} onChange={e => setSwapForm(p => ({ ...p, wants: e.target.value }))}
+                    placeholder="e.g. Canva design help" style={inputStyle} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">Message (optional)</label>
+                  <textarea value={swapForm.message} onChange={e => setSwapForm(p => ({ ...p, message: e.target.value }))}
+                    rows={2} placeholder="Hey, I noticed you're great at..." style={{ ...inputStyle, resize: 'none' }} />
+                </div>
+                <motion.button onClick={handleProposeSwap} whileTap={{ scale: 0.97 }}
+                  className="w-full py-3.5 rounded-2xl font-bold text-sm text-white"
+                  style={{ background: 'linear-gradient(135deg, #EC4899, #DB2777)' }}>
+                  Send Swap Proposal 🔄
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

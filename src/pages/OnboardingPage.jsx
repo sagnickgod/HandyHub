@@ -111,7 +111,7 @@ export default function OnboardingPage() {
         {/* Header & Progress */}
         <div className="mb-12">
           <div className="flex items-center justify-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-white font-bold text-xl shadow-[0_0_20px_rgba(124,111,247,0.3)]">H</div>
+            <img src="/icon.svg" alt="HandyHub logo" className="w-12 h-12 object-contain drop-shadow-md" />
             <span className="font-heading text-2xl font-bold tracking-tight">HandyHub</span>
           </div>
 

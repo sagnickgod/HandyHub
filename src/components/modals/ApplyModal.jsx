@@ -1,28 +1,81 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X } from 'lucide-react'
+import { X, Clock } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../ui/Toast'
 import ReputationStars from '../ui/ReputationStars'
 
+function TimePickerField({ hours, minutes, onChangeHours, onChangeMinutes }) {
+  const selectStyle = {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    padding: '10px 12px',
+    color: '#fff',
+    fontSize: 14,
+    outline: 'none',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    cursor: 'pointer',
+    flex: 1,
+    textAlign: 'center',
+  }
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-text-muted mb-1">
+        <Clock size={13} className="inline mr-1.5 align-[-2px]" />
+        Estimated Time
+      </label>
+      <div className="flex gap-2 items-center">
+        <div className="flex-1">
+          <select value={hours} onChange={e => onChangeHours(e.target.value)} style={selectStyle}>
+            {Array.from({ length: 24 }, (_, i) => (
+              <option key={i} value={String(i).padStart(2, '0')} style={{ background: '#1a1a24' }}>
+                {String(i).padStart(2, '0')}
+              </option>
+            ))}
+          </select>
+          <p className="text-[10px] text-white/30 text-center mt-1">Hours</p>
+        </div>
+        <span className="text-white/40 font-bold text-lg pb-4">:</span>
+        <div className="flex-1">
+          <select value={minutes} onChange={e => onChangeMinutes(e.target.value)} style={selectStyle}>
+            {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => (
+              <option key={m} value={String(m).padStart(2, '0')} style={{ background: '#1a1a24' }}>
+                {String(m).padStart(2, '0')}
+              </option>
+            ))}
+          </select>
+          <p className="text-[10px] text-white/30 text-center mt-1">Minutes</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ApplyModal({ isOpen, onClose, task, onApplied }) {
   const { profile } = useAuth()
   const { addToast } = useToast()
   const [pitch, setPitch] = useState('')
-  const [estimatedTime, setEstimatedTime] = useState('')
+  const [hours, setHours] = useState('01')
+  const [minutes, setMinutes] = useState('00')
   const [loading, setLoading] = useState(false)
+
+  const formatTime = () => `${hours}:${minutes}:00`
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!pitch.trim()) { addToast('Please add a pitch', 'warning'); return }
+    if (hours === '00' && minutes === '00') { addToast('Please set an estimated time', 'warning'); return }
     setLoading(true)
 
     const { error } = await supabase.from('applications').insert({
       task_id: task.id,
       applicant_id: profile.id,
       pitch: pitch.trim(),
-      estimated_time: estimatedTime.trim() || null
+      estimated_time: formatTime()
     })
 
     if (error) {
@@ -38,6 +91,9 @@ export default function ApplyModal({ isOpen, onClose, task, onApplied }) {
       addToast('Application submitted!', 'success')
       onApplied?.()
       onClose()
+      setPitch('')
+      setHours('01')
+      setMinutes('00')
     }
     setLoading(false)
   }
@@ -88,14 +144,18 @@ export default function ApplyModal({ isOpen, onClose, task, onApplied }) {
                   className="resize-none"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-text-muted mb-1">Estimated Time</label>
-                <input
-                  value={estimatedTime}
-                  onChange={e => setEstimatedTime(e.target.value)}
-                  placeholder="e.g., 2 hours, by tomorrow"
-                />
-              </div>
+
+              <TimePickerField
+                hours={hours}
+                minutes={minutes}
+                onChangeHours={setHours}
+                onChangeMinutes={setMinutes}
+              />
+
+              <p className="text-xs text-white/30 -mt-2">
+                Estimated: <strong className="text-white/60">{parseInt(hours)}h {parseInt(minutes)}m</strong>
+              </p>
+
               <button
                 type="submit"
                 disabled={loading}

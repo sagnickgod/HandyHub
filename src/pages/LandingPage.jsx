@@ -30,7 +30,7 @@ export default function LandingPage() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0A0A0F]/80 backdrop-blur-xl border-b border-white/5">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-white font-bold shadow-lg shadow-primary/25">H</div>
+            <img src="/icon.svg" alt="HandyHub logo" className="w-10 h-10 object-contain drop-shadow-md" />
             <span className="font-heading text-2xl font-bold tracking-tight">HandyHub</span>
           </div>
           <div className="flex items-center gap-6">

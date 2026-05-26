@@ -98,84 +98,33 @@ export function usePoints() {
   }
 
   const releaseEscrow = async (posterId, helperId, amount, taskId) => {
-    // Deduct from poster escrow
-    await supabase
-      .from('point_transactions')
-      .insert({
-        user_id: posterId,
-        type: 'escrow_release',
-        amount: -amount,
-        description: 'Escrow released for completed task',
-        task_id: taskId
-      })
+    const { error } = await supabase.rpc('release_escrow', {
+      p_poster_id: posterId,
+      p_helper_id: helperId,
+      p_amount: amount,
+      p_task_id: taskId
+    })
 
-    // Credit to helper
-    await supabase
-      .from('point_transactions')
-      .insert({
-        user_id: helperId,
-        type: 'earn',
-        amount: amount,
-        description: 'Payment for completing task',
-        task_id: taskId
-      })
-
-    // Update poster escrow
-    const { data: posterProfile } = await supabase
-      .from('profiles')
-      .select('escrow_balance')
-      .eq('id', posterId)
-      .single()
-
-    await supabase
-      .from('profiles')
-      .update({ escrow_balance: Math.max(0, (posterProfile?.escrow_balance || 0) - amount) })
-      .eq('id', posterId)
-
-    // Update helper balance
-    const { data: helperProfile } = await supabase
-      .from('profiles')
-      .select('points_balance, total_tasks_helped')
-      .eq('id', helperId)
-      .single()
-
-    await supabase
-      .from('profiles')
-      .update({
-        points_balance: (helperProfile?.points_balance || 0) + amount,
-        total_tasks_helped: (helperProfile?.total_tasks_helped || 0) + 1
-      })
-      .eq('id', helperId)
+    if (error) {
+      console.error('Failed to release escrow', error)
+      throw error // Or handle more gracefully depending on usage
+    }
 
     await refreshProfile()
   }
 
   const refundEscrow = async (userId, amount, taskId, penalty = 0) => {
-    const refundAmount = amount - penalty
-
-    await supabase
-      .from('point_transactions')
-      .insert({
-        user_id: userId,
-        type: 'escrow_refund',
-        amount: refundAmount,
-        description: penalty > 0 ? `Escrow refund minus ${penalty}pt penalty` : 'Escrow refund',
-        task_id: taskId
-      })
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('points_balance, escrow_balance')
-      .eq('id', userId)
-      .single()
-
-    await supabase
-      .from('profiles')
-      .update({
-        points_balance: (profile?.points_balance || 0) + refundAmount,
-        escrow_balance: Math.max(0, (profile?.escrow_balance || 0) - amount)
-      })
-      .eq('id', userId)
+    const { error } = await supabase.rpc('refund_escrow', {
+      p_user_id: userId,
+      p_amount: amount,
+      p_task_id: taskId,
+      p_penalty: penalty
+    })
+    
+    if (error) {
+      console.error('Failed to refund escrow', error)
+      throw error
+    }
 
     await refreshProfile()
   }
@@ -211,41 +160,16 @@ export function useDailyBonuses() {
   }, [user])
 
   const claimLoginBonus = async () => {
-    if (!user) return
+    if (!user) return false
     const today = new Date().toISOString().split('T')[0]
     const exists = completions.find(c => c.challenge_type === 'login')
     if (exists) return false
 
-    await supabase.from('daily_completions').insert({
-      user_id: user.id,
-      challenge_type: 'login',
-      completed_date: today
-    })
-
-    await supabase.from('point_transactions').insert({
-      user_id: user.id,
-      type: 'bonus',
-      amount: 10,
-      description: 'Daily login bonus'
-    })
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('points_balance')
-      .eq('id', user.id)
-      .single()
-
-    await supabase
-      .from('profiles')
-      .update({ points_balance: (profile?.points_balance || 0) + 10 })
-      .eq('id', user.id)
-
-    await supabase.from('notifications').insert({
-      user_id: user.id,
-      type: 'bonus',
-      title: '🪙 +10 Daily login bonus!',
-      body: 'You earned 10 points for logging in today.'
-    })
+    const { error } = await supabase.rpc('claim_login_bonus', { p_user_id: user.id })
+    if (error) {
+      console.error('Failed to claim bonus:', error)
+      return false
+    }
 
     setCompletions(prev => [...prev, { challenge_type: 'login', completed_date: today }])
     await refreshProfile()

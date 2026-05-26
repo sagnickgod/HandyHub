@@ -24,6 +24,10 @@ export function useTasks(filters = {}) {
     }
     if (filters.state) {
       query = query.eq('state', filters.state)
+      // Exclude expired tasks from the open feed
+      if (filters.state === 'open') {
+        query = query.or('deadline.is.null,deadline.gt.' + new Date().toISOString())
+      }
     }
     if (filters.posterId) {
       query = query.eq('poster_id', filters.posterId)
@@ -87,7 +91,7 @@ export function useTask(taskId) {
         poster:profiles!poster_id(id, full_name, username, avatar_url, reputation_score, completion_rate),
         helper:profiles!selected_helper_id(id, full_name, username, avatar_url, reputation_score, completion_rate),
         task_attachments(*),
-        proofs(*),
+        proofs(*, helper:profiles!helper_id(id, full_name, avatar_url)),
         ratings(*),
         disputes(*)
       `)
@@ -112,7 +116,7 @@ export function useApplications(taskId) {
     const fetch = async () => {
       const { data } = await supabase
         .from('applications')
-        .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate)')
+        .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate, total_tasks_helped)')
         .eq('task_id', taskId)
         .order('created_at', { ascending: false })
       setApplications(data || [])
@@ -121,14 +125,16 @@ export function useApplications(taskId) {
     fetch()
   }, [taskId])
 
-  return { applications, loading, refetch: () => {
-    supabase
-      .from('applications')
-      .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate)')
-      .eq('task_id', taskId)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => setApplications(data || []))
-  }}
+  return {
+    applications, loading, refetch: () => {
+      supabase
+        .from('applications')
+        .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate, total_tasks_helped)')
+        .eq('task_id', taskId)
+        .order('created_at', { ascending: false })
+        .then(({ data }) => setApplications(data || []))
+    }
+  }
 }
 
 export function useUserApplications(userId) {

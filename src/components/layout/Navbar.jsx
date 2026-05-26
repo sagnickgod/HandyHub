@@ -21,9 +21,7 @@ export default function Navbar({ onSearch }) {
     <header className="lg:hidden sticky top-0 z-40 bg-surface/80 backdrop-blur-xl border-b border-border">
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate('/feed')}>
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm">
-            H
-          </div>
+          <img src="/icon.svg" alt="HandyHub Icon" className="w-9 h-9 object-contain drop-shadow-md" />
           <span className="font-heading text-lg font-bold text-text">HandyHub</span>
         </div>
 

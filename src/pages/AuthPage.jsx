@@ -34,9 +34,21 @@ export default function AuthPage() {
   const [year, setYear] = useState('')
   const [showRegPass, setShowRegPass] = useState(false)
   const [errors, setErrors] = useState({})
+  const [referralCode, setReferralCode] = useState('')
 
   const handleLogin = async (e) => {
     e.preventDefault()
+
+    if (!loginEmail.trim() || !loginPassword.trim()) {
+      addToast('Please enter both email and password.', 'error')
+      return
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(loginEmail)) {
+      addToast('Please enter a valid email address.', 'error')
+      return
+    }
+
     setLoading(true)
     
     try {
@@ -74,7 +86,8 @@ export default function AuthPage() {
       full_name: fullName.trim(),
       username: username.trim().toLowerCase(),
       course: course.trim(),
-      year: year ? parseInt(year) : null
+      year: year ? parseInt(year) : null,
+      referred_by: referralCode.trim().toUpperCase() || null
     })
 
     if (error) {
@@ -104,7 +117,7 @@ export default function AuthPage() {
         
         <div className="relative z-10 p-16 max-w-xl">
           <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }} className="flex items-center gap-3 mb-10">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-white font-bold text-2xl shadow-lg shadow-primary/25 cursor-pointer" onClick={() => navigate('/')}>H</div>
+            <img src="/icon.svg" alt="HandyHub Icon" className="w-14 h-14 object-contain cursor-pointer drop-shadow-xl hover:scale-105 transition-transform" onClick={() => navigate('/')} />
             <span className="font-heading text-3xl font-bold tracking-tight">HandyHub</span>
           </motion.div>
           
@@ -153,7 +166,7 @@ export default function AuthPage() {
         >
           {/* Mobile Logo */}
           <div className="flex items-center justify-center gap-2 mb-10 lg:hidden cursor-pointer" onClick={() => navigate('/')}>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-primary/25">H</div>
+            <img src="/icon.svg" alt="HandyHub Icon" className="w-12 h-12 object-contain drop-shadow-lg" />
             <span className="font-heading text-2xl font-bold tracking-tight">HandyHub</span>
           </div>
 
@@ -259,6 +272,12 @@ export default function AuthPage() {
                   <label className="block text-sm font-bold text-white/70 mb-2">Confirm Password</label>
                   <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="••••••••" className="w-full bg-[#1A1A23] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:border-primary transition-all outline-none" />
                   {errors.confirm && <p className="text-danger text-xs mt-1 font-medium">{errors.confirm}</p>}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-white/70 mb-2">Referral Code <span className="text-white/40 font-normal">(Opt)</span></label>
+                  <input value={referralCode} onChange={e => setReferralCode(e.target.value)} placeholder="e.g. JANE4X" className="w-full bg-[#1A1A23] border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:border-primary transition-all outline-none uppercase tracking-wider font-mono" maxLength={10} />
+                  <p className="text-white/25 text-[10px] mt-1">Have a friend's code? Get 150 bonus pts!</p>
                 </div>
 
                 <button type="submit" disabled={loading} className="w-full bg-accent text-bg py-4 rounded-xl font-extrabold tracking-wide hover:shadow-[0_0_20px_rgba(245,158,11,0.4)] transition-all btn-press disabled:opacity-50 mt-6 text-lg">

@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Home, PlusCircle, Wallet, Trophy, Award, User, Bell, Shield, Sun, Moon } from 'lucide-react'
+import { Home, PlusCircle, Wallet, Trophy, Award, User, Bell, Shield, Sun, Moon, MessageSquare, Megaphone, BookOpen, GraduationCap, ArrowLeftRight } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useNotifications } from '../../context/NotificationContext'
 import { useTheme } from '../../context/ThemeContext'
@@ -7,9 +7,15 @@ import { useTheme } from '../../context/ThemeContext'
 const navItems = [
   { to: '/feed', icon: Home, label: 'Feed' },
   { to: '/post-task', icon: PlusCircle, label: 'Post Task' },
+  { to: '/notices', icon: Megaphone, label: 'Notices' },
+  { to: '/study-groups', icon: BookOpen, label: 'Study Groups' },
+  { to: '/mentors', icon: GraduationCap, label: 'Mentors' },
   { to: '/wallet', icon: Wallet, label: 'Wallet' },
   { to: '/leaderboard', icon: Trophy, label: 'Leaderboard' },
   { to: '/badges', icon: Award, label: 'Badges' },
+  { to: '/referrals', icon: User, label: 'Referrals' },
+  { to: '/chat', icon: MessageSquare, label: 'Messages' },
+  { to: '/swaps', icon: ArrowLeftRight, label: 'Skill Swaps' },
   { to: '/profile', icon: User, label: 'Profile' },
   { to: '/notifications', icon: Bell, label: 'Notifications', badge: true },
 ]
@@ -26,13 +32,11 @@ export default function Sidebar() {
         className="flex items-center gap-3 px-6 py-5 cursor-pointer"
         onClick={() => navigate('/feed')}
       >
-        <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-white font-bold text-lg">
-          H
-        </div>
+        <img src="/icon.svg" alt="HandyHub Icon" className="w-9 h-9 object-contain drop-shadow-md" />
         <span className="font-heading text-xl font-bold text-text">HandyHub</span>
       </div>
 
-      <nav className="flex-1 px-3 py-2 space-y-1">
+      <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto scrollbar-hide">
         {navItems.map(item => (
           <NavLink
             key={item.to}
