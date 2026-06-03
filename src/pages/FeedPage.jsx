@@ -1,9 +1,11 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Search, Zap, Clock, Star, LayoutGrid, Flame, ArrowRight, Sparkles, Megaphone, X } from 'lucide-react'
+import { Plus, Search, Zap, Clock, Star, LayoutGrid, Flame, ArrowRight, Sparkles, Megaphone, X, Eye, Package, Gift, Calendar, AlertTriangle, Briefcase } from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../components/ui/Toast'
 import { useTasks, useUserApplications } from '../hooks/useTasks'
 import TaskCard from '../components/tasks/TaskCard'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
@@ -33,6 +35,15 @@ const FILTERS = [
   { id: 'urgent',    label: 'Urgent',             icon: Flame,    dot: '#EF4444' },
   { id: 'deadline',  label: 'Deadline Soon',      icon: Clock,    dot: '#F59E0B' },
   { id: 'highReward',label: 'High Reward (150+)', icon: Zap,      dot: '#FBBF24' },
+]
+
+const NOTICE_CATEGORIES = [
+  { key: 'all', label: 'All', icon: Megaphone, color: '#7C6FF7' },
+  { key: 'lost_found', label: 'Lost & Found', icon: Package, color: '#F59E0B' },
+  { key: 'free_item', label: 'Free Item', icon: Gift, color: '#34D399' },
+  { key: 'event', label: 'Event', icon: Calendar, color: '#38BDF8' },
+  { key: 'alert', label: 'Alert', icon: AlertTriangle, color: '#EF4444' },
+  { key: 'opportunity', label: 'Opportunity', icon: Briefcase, color: '#A855F7' },
 ]
 
 function FeaturedTaskCard({ task, applied }) {
@@ -240,6 +251,73 @@ export default function FeedPage() {
   const [polls, setPolls] = useState([])
   const [noticeCount, setNoticeCount] = useState(0)
   const [showNoticeBanner, setShowNoticeBanner] = useState(true)
+  const { addToast } = useToast()
+  const [notices, setNotices] = useState([])
+  const [noticesLoading, setNoticesLoading] = useState(false)
+  const [noticeFilter, setNoticeFilter] = useState('all')
+  const [showCreateNotice, setShowCreateNotice] = useState(false)
+  const [noticeForm, setNoticeForm] = useState({ title: '', body: '', category: 'event' })
+  const [postingNotice, setPostingNotice] = useState(false)
+
+  const fetchNoticesList = useCallback(async () => {
+    setNoticesLoading(true)
+    let query = supabase
+      .from('notices')
+      .select('*, poster:profiles!poster_id(id, full_name, avatar_url, username)')
+      .eq('is_active', true)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+
+    if (noticeFilter !== 'all') query = query.eq('category', noticeFilter)
+
+    const { data } = await query
+    setNotices(data || [])
+    setNoticesLoading(false)
+  }, [noticeFilter])
+
+  useEffect(() => {
+    if (feedMode === 'notices') {
+      fetchNoticesList()
+    }
+  }, [feedMode, fetchNoticesList])
+
+  const handlePostNotice = async () => {
+    if (!noticeForm.title.trim() || !noticeForm.body.trim()) return addToast('Fill in all fields', 'error')
+    setPostingNotice(true)
+    const { error } = await supabase.from('notices').insert({
+      poster_id: user.id,
+      title: noticeForm.title.trim(),
+      body: noticeForm.body.trim(),
+      category: noticeForm.category,
+    })
+    if (error) { addToast(error.message, 'error') }
+    else { 
+      addToast('Notice posted! 📢', 'success')
+      setShowCreateNotice(false)
+      setNoticeForm({ title: '', body: '', category: 'event' })
+      fetchNoticesList()
+      // Refresh count
+      supabase.from('notices').select('id', { count: 'exact', head: true })
+        .eq('is_active', true).gt('expires_at', new Date().toISOString())
+        .then(({ count }) => setNoticeCount(count || 0))
+    }
+    setPostingNotice(false)
+  }
+
+  const incrementNoticeViews = async (id) => {
+    await supabase.rpc('increment_notice_views', { notice_id: id }).catch(() => {
+      supabase.from('notices').update({ views: supabase.sql`views + 1` }).eq('id', id).then(() => {})
+    })
+  }
+
+  function getTimeLeft(expiresAt) {
+    const diff = new Date(expiresAt) - new Date()
+    if (diff <= 0) return 'Expired'
+    const hours = Math.floor(diff / 3600000)
+    const mins = Math.floor((diff % 3600000) / 60000)
+    if (hours > 0) return `${hours}h ${mins}m left`
+    return `${mins}m left`
+  }
 
   // Fetch active polls
   useEffect(() => {
@@ -355,11 +433,11 @@ export default function FeedPage() {
             initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
             className="mb-4 px-4 py-3 rounded-2xl flex items-center justify-between cursor-pointer group"
             style={{ background: 'rgba(124,111,247,0.08)', border: '1px solid rgba(124,111,247,0.2)' }}
-            onClick={() => navigate('/notices')}
+            onClick={() => setFeedMode('notices')}
           >
             <div className="flex items-center gap-2">
               <Megaphone size={15} className="text-violet-400" />
-              <span className="text-sm text-violet-300 font-bold">📢 {noticeCount} new notice{noticeCount !== 1 ? 's' : ''}</span>
+              <span className="text-sm text-violet-300 font-bold">📢 {noticeCount} new notices today</span>
               <span className="text-xs text-white/30">— Tap to view</span>
             </div>
             <button onClick={(e) => { e.stopPropagation(); setShowNoticeBanner(false) }} className="text-white/25 hover:text-white/50 p-1">
@@ -392,10 +470,97 @@ export default function FeedPage() {
           >
             My Tasks
           </button>
+          <button
+            onClick={() => setFeedMode('notices')}
+            className="px-6 py-2.5 rounded-xl text-sm font-bold transition-all relative overflow-hidden flex items-center gap-1.5"
+            style={{
+              color: feedMode === 'notices' ? '#fff' : 'rgba(255,255,255,0.45)',
+              background: feedMode === 'notices' ? 'linear-gradient(135deg, rgba(124,111,247,0.8), rgba(91,82,229,0.8))' : 'transparent',
+              boxShadow: feedMode === 'notices' ? '0 4px 16px rgba(124,111,247,0.3)' : 'none'
+            }}
+          >
+            Notices {noticeCount > 0 && <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-red-500 text-white font-black">{noticeCount}</span>}
+          </button>
         </div>
 
         {feedMode === 'my_tasks' ? (
           <MyTasksView />
+        ) : feedMode === 'notices' ? (
+          <div className="space-y-6">
+            {/* Notices feed header */}
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between mb-2">
+              <div>
+                <h2 className="font-heading text-2xl font-black text-white flex items-center gap-2">📢 Notices Feed</h2>
+                <p className="text-white/40 text-sm mt-1">Stay updated with active student announcements</p>
+              </div>
+              <motion.button onClick={() => setShowCreateNotice(true)} whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                className="px-4 py-2.5 rounded-xl font-bold text-sm text-white flex items-center gap-2"
+                style={{ background: 'linear-gradient(135deg, #7C6FF7, #5B52E5)', boxShadow: '0 4px 16px rgba(124,111,247,0.3)' }}>
+                <Plus size={16} /> Post Notice
+              </motion.button>
+            </motion.div>
+
+            {/* Notice Category Filters */}
+            <div className="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-hide">
+              {NOTICE_CATEGORIES.map(c => (
+                <button key={c.key} onClick={() => setNoticeFilter(c.key)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all"
+                  style={{
+                    background: noticeFilter === c.key ? `${c.color}20` : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${noticeFilter === c.key ? `${c.color}40` : 'rgba(255,255,255,0.06)'}`,
+                    color: noticeFilter === c.key ? c.color : 'rgba(255,255,255,0.4)',
+                  }}>
+                  <c.icon size={13} /> {c.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Notices Grid */}
+            {noticesLoading ? (
+              <LoadingSpinner text="Loading announcements..." />
+            ) : notices.length === 0 ? (
+              <EmptyState title="No notices yet" description="Be the first to post a campus update!" />
+            ) : (
+              <motion.div className="grid grid-cols-1 md:grid-cols-2 gap-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                {notices.map((n, i) => {
+                  const cat = NOTICE_CATEGORIES.find(c => c.key === n.category) || NOTICE_CATEGORIES[0]
+                  return (
+                    <motion.div key={n.id}
+                      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+                      onClick={() => incrementNoticeViews(n.id)}
+                      className="p-5 rounded-2xl cursor-pointer group transition-all"
+                      style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.06)' }}
+                      whileHover={{ y: -2, boxShadow: '0 8px 30px rgba(0,0,0,0.3)' }}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-lg text-[10px] font-black uppercase"
+                            style={{ background: `${cat.color}15`, color: cat.color, border: `1px solid ${cat.color}25` }}>
+                            {cat.label}
+                          </span>
+                           <span className="text-[10px] text-white/25 flex items-center gap-1">
+                             <Clock size={10} /> {getTimeLeft(n.expires_at)}
+                           </span>
+                        </div>
+                        <span className="text-[10px] text-white/20 flex items-center gap-1"><Eye size={10} />{n.views}</span>
+                      </div>
+                      <h3 className="text-white/85 font-bold text-sm mb-1.5 group-hover:text-white transition-colors">{n.title}</h3>
+                      <p className="text-white/40 text-xs leading-relaxed mb-4">{n.body}</p>
+                      <div className="flex items-center gap-2 pt-3 border-t border-white/[0.03]">
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white/60"
+                          style={{ background: 'rgba(124,111,247,0.2)' }}>
+                          {n.poster?.avatar_url
+                            ? <img src={n.poster.avatar_url} alt="" className="w-full h-full object-cover rounded-full" />
+                            : n.poster?.full_name?.[0] || '?'}
+                        </div>
+                        <span className="text-[10px] text-white/35 font-semibold">@{n.poster?.username || n.poster?.full_name || 'student'}</span>
+                        <span className="text-[10px] text-white/20 ml-auto">{formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}</span>
+                      </div>
+                    </motion.div>
+                  )
+                })}
+              </motion.div>
+            )}
+          </div>
         ) : (
           <>
         {/* Search bar */}
@@ -532,7 +697,7 @@ export default function FeedPage() {
 
       {/* FAB */}
       <motion.button
-        onClick={() => navigate('/post-task')}
+        onClick={() => feedMode === 'notices' ? setShowCreateNotice(true) : navigate('/post-task')}
         className="fixed bottom-24 lg:bottom-8 right-6 flex items-center gap-2 px-5 py-3.5 font-black text-sm text-white rounded-2xl z-30"
         whileHover={{ scale: 1.05, y: -2 }}
         whileTap={{ scale: 0.96 }}
@@ -542,8 +707,61 @@ export default function FeedPage() {
         }}
       >
         <Plus size={17} />
-        Post Task
+        {feedMode === 'notices' ? 'Post Notice' : 'Post Task'}
       </motion.button>
+
+      {/* Create Notice Modal */}
+      <AnimatePresence>
+        {showCreateNotice && (
+          <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowCreateNotice(false)} />
+            <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+              className="relative w-full max-w-lg rounded-3xl p-6 z-10 text-white"
+              style={{ background: '#17171D', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-white font-bold text-lg">📢 Post a Notice</h2>
+                <button onClick={() => setShowCreateNotice(false)} className="text-white/40 hover:text-white"><X size={20} /></button>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">Title</label>
+                  <input value={noticeForm.title} onChange={e => setNoticeForm(p => ({ ...p, title: e.target.value }))}
+                    maxLength={100} placeholder="e.g. Lost my blue hoodie near canteen"
+                    className="w-full px-4 py-3 bg-[#0A0A0F] border border-white/5 rounded-xl text-sm text-white outline-none focus:border-primary transition-all" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">Details</label>
+                  <textarea value={noticeForm.body} onChange={e => setNoticeForm(p => ({ ...p, body: e.target.value }))}
+                    rows={3} placeholder="Describe the notice..."
+                    className="w-full px-4 py-3 bg-[#0A0A0F] border border-white/5 rounded-xl text-sm text-white outline-none resize-none focus:border-primary transition-all" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-[0.15em] text-white/30 block mb-2">Category</label>
+                  <div className="flex flex-wrap gap-2">
+                    {NOTICE_CATEGORIES.filter(c => c.key !== 'all').map(c => (
+                      <button key={c.key} type="button" onClick={() => setNoticeForm(p => ({ ...p, category: c.key }))}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                        style={{
+                          background: noticeForm.category === c.key ? `${c.color}20` : 'rgba(255,255,255,0.04)',
+                          border: `1px solid ${noticeForm.category === c.key ? `${c.color}40` : 'rgba(255,255,255,0.07)'}`,
+                          color: noticeForm.category === c.key ? c.color : 'rgba(255,255,255,0.3)',
+                        }}>
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <motion.button onClick={handlePostNotice} disabled={postingNotice} whileTap={{ scale: 0.97 }}
+                  className="w-full py-3.5 rounded-2xl font-bold text-sm text-white"
+                  style={{ background: 'linear-gradient(135deg, #7C6FF7, #5B52E5)', boxShadow: '0 8px 24px rgba(124,111,247,0.3)' }}>
+                  {postingNotice ? 'Posting...' : 'Post Notice 📢'}
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

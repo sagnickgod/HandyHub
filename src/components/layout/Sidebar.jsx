@@ -1,14 +1,16 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Home, PlusCircle, Wallet, Trophy, Award, User, Bell, Shield, Sun, Moon, MessageSquare, Megaphone, BookOpen, GraduationCap, ArrowLeftRight } from 'lucide-react'
+import { Home, PlusCircle, Wallet, Trophy, Award, User, Bell, Shield, Sun, Moon, MessageSquare, Megaphone, BookOpen, GraduationCap, ArrowLeftRight, Flame, Briefcase } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useNotifications } from '../../context/NotificationContext'
 import { useTheme } from '../../context/ThemeContext'
 
 const navItems = [
   { to: '/feed', icon: Home, label: 'Feed' },
+  { to: '/problems', icon: Flame, label: 'Problems' },
+  { to: '/projects', icon: Briefcase, label: 'Projects' },
   { to: '/post-task', icon: PlusCircle, label: 'Post Task' },
   { to: '/notices', icon: Megaphone, label: 'Notices' },
-  { to: '/study-groups', icon: BookOpen, label: 'Study Groups' },
+  { to: '/study-groups', icon: BookOpen, label: 'Groups' },
   { to: '/mentors', icon: GraduationCap, label: 'Mentors' },
   { to: '/wallet', icon: Wallet, label: 'Wallet' },
   { to: '/leaderboard', icon: Trophy, label: 'Leaderboard' },

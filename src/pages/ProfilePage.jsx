@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase'
 import { useToast } from '../components/ui/Toast'
 import { LevelBadge, getLevelProgress, getLevelInfo } from '../lib/levels'
 import { calculateProfileScore, PROFILE_SCORE_ITEMS } from '../lib/profileCompletion'
+import { logHighlight } from '../lib/activityLogger'
 import PointsDisplay from '../components/ui/PointsDisplay'
 import ReputationStars from '../components/ui/ReputationStars'
 import StreakCounter from '../components/ui/StreakCounter'
@@ -36,7 +37,8 @@ export default function ProfilePage() {
   const { profile, loading, refetch } = useProfile(targetId)
   const { badges } = useUserBadges(targetId)
 
-  const [tab, setTab] = useState('helped')
+  const [tab, setTab] = useState('highlights')
+  const [highlights, setHighlights] = useState([])
   const [editing, setEditing] = useState(false)
   const [bio, setBio] = useState('')
   const [skills, setSkills] = useState([])
@@ -55,6 +57,13 @@ export default function ProfilePage() {
   const [swapForm, setSwapForm] = useState({ offers: '', wants: '', message: '' })
   const [showVouchModal, setShowVouchModal] = useState(null)
   const fileInputRef = useRef(null)
+
+  const levelProgress = getLevelProgress(totalPointsEarned)
+  const myLevel = getLevelInfo(myProfile?.points_earned || totalPointsEarned)
+  const profileScore = isOwn ? calculateProfileScore(profile, { ...profileStats, skillsVerified: verifiedSkills.length }) : null
+  const isSkillVerified = (skill) => verifiedSkills.some(v => v.skill === skill)
+  const canVouch = !isOwn && myLevel.level >= 5
+  const isOnline = profile?.last_active_date === new Date().toISOString().split('T')[0]
 
   useEffect(() => {
     if (profile) { setBio(profile.bio || ''); setSkills(profile.skills || []); setAvailability(profile.availability || 'anytime') }
@@ -114,7 +123,10 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!targetId) return
-    if (tab === 'helped') {
+    if (tab === 'highlights') {
+      supabase.from('activity_highlights').select('*').eq('user_id', targetId).order('is_pinned', { ascending: false }).order('created_at', { ascending: false })
+        .then(({ data }) => setHighlights(data || []))
+    } else if (tab === 'helped') {
       supabase.from('tasks').select('id, title, state, points_offered, completed_at, category')
         .eq('selected_helper_id', targetId).eq('state', 'completed')
         .order('completed_at', { ascending: false }).limit(20)
@@ -132,6 +144,25 @@ export default function ProfilePage() {
       setBookmarks(saved)
     }
   }, [targetId, tab, isOwn])
+
+  // Handle Profile Completion Check and rewards trigger
+  useEffect(() => {
+    if (isOwn && profileScore && profileScore.isComplete) {
+      const rewarded = localStorage.getItem('handyhub-perfect-profile-rewarded')
+      if (!rewarded) {
+        const claimReward = async () => {
+          await awardPoints(user.id, 100, 'Bonus: 100% Profile Completion Perfect Profile! ✨')
+          await supabase.from('user_badges').insert({ user_id: user.id, badge_id: 'perfect_profile' }).catch(() => {})
+          await logHighlight(user.id, 'badge_earned', 'Perfect Profile unlocked! ✨', 'Completed co-curricular activity record setup 100%. (+100 pts)')
+          
+          localStorage.setItem('handyhub-perfect-profile-rewarded', 'true')
+          addToast('🎉 Perfect Profile achieved! 100 Coins & Perfect Profile Badge unlocked!', 'success')
+          refreshProfile()
+        }
+        claimReward()
+      }
+    }
+  }, [isOwn, profileScore, user?.id])
 
   const handleSave = async () => {
     setSaving(true)
@@ -159,6 +190,47 @@ export default function ProfilePage() {
     setUploadingAvatar(false)
   }
 
+  const awardPoints = async (targetUserId, amount, description) => {
+    try {
+      const { data: targetProfile } = await supabase.from('profiles').select('points_balance, lifetime_points_earned').eq('id', targetUserId).single()
+      if (targetProfile) {
+        const nextBalance = targetProfile.points_balance + amount
+        const nextLifetime = (targetProfile.lifetime_points_earned || 0) + amount
+        
+        await supabase.from('point_transactions').insert({
+          user_id: targetUserId,
+          type: 'bonus',
+          amount,
+          description
+        })
+
+        await supabase.from('profiles').update({
+          points_balance: nextBalance,
+          lifetime_points_earned: nextLifetime
+        }).eq('id', targetUserId)
+      }
+    } catch (err) {
+      console.error('[ProfilePage] awardPoints error:', err)
+    }
+  }
+
+  const togglePin = async (highId, currentPin) => {
+    if (currentPin) {
+      await supabase.from('activity_highlights').update({ is_pinned: false }).eq('id', highId)
+      addToast('Highlight unpinned! 📌', 'success')
+    } else {
+      const pinnedCount = highlights.filter(h => h.is_pinned).length
+      if (pinnedCount >= 3) {
+        addToast('Maximum 3 pinned highlights allowed!', 'error')
+        return
+      }
+      await supabase.from('activity_highlights').update({ is_pinned: true }).eq('id', highId)
+      addToast('Highlight pinned to top! 📌', 'success')
+    }
+    const { data } = await supabase.from('activity_highlights').select('*').eq('user_id', targetId).order('is_pinned', { ascending: false }).order('created_at', { ascending: false })
+    setHighlights(data || [])
+  }
+
   const handleVouch = async (skill) => {
     const { error } = await supabase.from('skill_verifications').insert({ user_id: targetId, skill, verified_by: user.id })
     if (error) {
@@ -166,6 +238,8 @@ export default function ProfilePage() {
       else addToast(error.message, 'error')
     } else {
       addToast(`Vouched for ${skill}! ✅`, 'success')
+      // Log co-curricular record highlight
+      await logHighlight(targetId, 'skill_verified', `Skill Endorsed: ${skill}`, `Vouched by peer @${myProfile?.username || 'user'}.`, user.id)
       // Send notification
       await supabase.from('notifications').insert({ user_id: targetId, type: 'vouch', message: `🎉 ${myProfile?.full_name} vouched for your ${skill} skill!`, link: `/profile/${user.id}` }).catch(() => {})
       setVerifiedSkills(prev => [...prev, { skill, verified_by: user.id }])
@@ -184,16 +258,9 @@ export default function ProfilePage() {
   }
 
   const toggleSkill = (s) => setSkills(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
-  const isOnline = profile?.last_active_date === new Date().toISOString().split('T')[0]
 
   if (loading) return <LoadingSpinner text="Loading profile..." />
   if (!profile) return <EmptyState title="Profile not found" />
-
-  const levelProgress = getLevelProgress(totalPointsEarned)
-  const myLevel = getLevelInfo(myProfile?.points_earned || totalPointsEarned)
-  const profileScore = isOwn ? calculateProfileScore(profile, profileStats) : null
-  const isSkillVerified = (skill) => verifiedSkills.some(v => v.skill === skill)
-  const canVouch = !isOwn && myLevel.level >= 5
 
   const STATS = [
     { label: 'Balance',    content: <PointsDisplay amount={profile.points_balance} size="sm" /> },
@@ -209,6 +276,7 @@ export default function ProfilePage() {
   ]
 
   const TABS = [
+    { key: 'highlights', label: 'Activity Record' },
     { key: 'helped', label: 'Helped' },
     { key: 'posted', label: 'Posted' },
     { key: 'reviews', label: 'Reviews' },
@@ -303,14 +371,36 @@ export default function ProfilePage() {
                 </div>
 
                 {isOwn && !editing ? (
-                  <motion.button
-                    onClick={() => setEditing(true)}
-                    whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }}
-                    className="p-2.5 rounded-xl transition-all"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
-                  >
-                    <Edit3 size={15} className="text-white/45" />
-                  </motion.button>
+                  <div className="flex items-center gap-2">
+                    <motion.button
+                      onClick={() => {
+                        const publicLink = `${window.location.origin}/u/${profile.username}`
+                        navigator.clipboard.writeText(publicLink)
+                        addToast('Portfolio link copied to clipboard! 📋', 'success')
+                      }}
+                      whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                      className="px-3 py-2 rounded-xl text-xs font-bold text-[#34D399] flex items-center gap-1.5"
+                      style={{ background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)' }}
+                    >
+                      Share Link
+                    </motion.button>
+                    <motion.button
+                      onClick={() => navigate(`/u/${profile.username}`)}
+                      whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                      className="px-3 py-2 rounded-xl text-xs font-bold text-white/70 flex items-center gap-1.5"
+                      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+                    >
+                      Preview
+                    </motion.button>
+                    <motion.button
+                      onClick={() => setEditing(true)}
+                      whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.95 }}
+                      className="p-2.5 rounded-xl transition-all"
+                      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    >
+                      <Edit3 size={15} className="text-white/45" />
+                    </motion.button>
+                  </div>
                 ) : !isOwn && (
                   <motion.button
                     onClick={() => setShowSwapModal(true)}
@@ -501,6 +591,69 @@ export default function ProfilePage() {
 
           {/* Tab content */}
           <AnimatePresence mode="wait">
+            {tab === 'highlights' && (
+              <motion.div key="highlights" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+                
+                <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/[0.03] flex items-center justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-xs font-bold text-white">Your Campus Activity Record</h4>
+                    <p className="text-[10px] text-white/45 mt-0.5">Verified chronological portfolio shareable as a public link.</p>
+                  </div>
+                  {isOwn && (
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button onClick={() => {
+                        const link = `${window.location.origin}/u/${profile.username}`
+                        navigator.clipboard.writeText(link)
+                        addToast('Link copied! 📋', 'success')
+                      }} className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase text-[#34D399] bg-[#34D399]/10 border border-[#34D399]/20 transition-all active:scale-95">
+                        Share Link
+                      </button>
+                      <button onClick={() => navigate(`/u/${profile.username}`)}
+                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase text-white/50 bg-white/5 border border-white/10 transition-all active:scale-95">
+                        Preview
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {highlights.length === 0 ? (
+                  <p className="text-center text-white/25 text-sm py-10">No highlights registered on this record yet.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {highlights.map(high => (
+                      <div key={high.id} className="p-4 rounded-2xl flex items-center justify-between gap-4 border"
+                        style={{ 
+                          background: high.is_pinned ? 'linear-gradient(135deg, rgba(245,158,11,0.03), rgba(23,23,29,1))' : '#17171D',
+                          borderColor: high.is_pinned ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.05)'
+                        }}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-white/5 text-white/45">
+                              {high.type.replace('_', ' ')}
+                            </span>
+                            {high.is_pinned && <span className="text-[9px] text-amber-400 font-bold">📌 Pinned</span>}
+                          </div>
+                          <p className="text-white/80 font-bold text-sm mt-1 leading-snug">{high.title}</p>
+                           {high.description && <p className="text-white/40 text-xs mt-0.5 leading-relaxed">{high.description}</p>}
+                        </div>
+                        {isOwn && (
+                          <button onClick={() => togglePin(high.id, high.is_pinned)}
+                            className="px-3 py-1.5 rounded-xl text-[9px] font-black uppercase transition-colors"
+                            style={{ 
+                              background: high.is_pinned ? 'rgba(245,158,11,0.1)' : 'rgba(255,255,255,0.03)',
+                              color: high.is_pinned ? '#F59E0B' : 'rgba(255,255,255,0.4)',
+                              border: `1px solid ${high.is_pinned ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.06)'}`
+                            }}>
+                            {high.is_pinned ? 'Unpin' : 'Pin Highlight'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
+
             {(tab === 'helped' || tab === 'posted') && (
               <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-2">
                 {tasks.length === 0 ? (

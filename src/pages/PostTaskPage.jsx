@@ -99,10 +99,7 @@ export default function PostTaskPage() {
     }
     setLoading(true)
 
-<<<<<<< HEAD
-=======
     // Insert task (hardcoded is_team_task to false to prevent logic bugs)
->>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
     const { data: task, error } = await supabase.from('tasks').insert({
       poster_id: profile.id,
       title: title.trim(),
@@ -128,11 +125,6 @@ export default function PostTaskPage() {
       const { error: uploadErr } = await supabase.storage.from('task-attachments').upload(path, file)
       if (!uploadErr) {
         const { data: { publicUrl } } = supabase.storage.from('task-attachments').getPublicUrl(path)
-<<<<<<< HEAD
-        await supabase.from('task_attachments').insert({ task_id: task.id, file_url: publicUrl, file_name: file.name, uploaded_by: profile.id })
-      } else {
-        addToast(`Failed to upload ${file.name}: ${uploadErr.message}`, 'error')
-=======
         await supabase.from('task_attachments').insert({
           task_id: task.id,
           file_url: publicUrl,
@@ -140,9 +132,7 @@ export default function PostTaskPage() {
           uploaded_by: profile.id
         })
       } else {
-        // Added error toast for silent upload failures
-        addToast(`Failed to upload ${file.name}`, 'error')
->>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
+        addToast(`Failed to upload ${file.name}: ${uploadErr.message}`, 'error')
       }
     }
 
@@ -302,7 +292,6 @@ export default function PostTaskPage() {
               </div>
             </FormSection>
 
-<<<<<<< HEAD
             {/* Points */}
             <FormSection title="Points Offered *">
               <input
@@ -399,12 +388,6 @@ export default function PostTaskPage() {
             </motion.button>
           </form>
         </motion.div>
-=======
-          <button type="submit" disabled={loading} className="w-full bg-primary text-white py-3.5 rounded-xl font-semibold text-lg hover:bg-primary-hover transition-colors btn-press disabled:opacity-50">
-            {loading ? 'Posting...' : 'Post Task & Lock Points'}
-          </button>
-        </motion.form>
->>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
       </div>
     </div>
   )

@@ -110,31 +110,32 @@ export function useTask(taskId) {
 export function useApplications(taskId) {
   const [applications, setApplications] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  useEffect(() => {
+  const fetchApps = useCallback(async () => {
     if (!taskId) return
-    const fetch = async () => {
-      const { data } = await supabase
-        .from('applications')
-        .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate, total_tasks_helped)')
-        .eq('task_id', taskId)
-        .order('created_at', { ascending: false })
+    setLoading(true)
+    const { data, error: dbError } = await supabase
+      .from('applications')
+      .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate, total_tasks_helped)')
+      .eq('task_id', taskId)
+      .order('created_at', { ascending: false })
+    
+    if (dbError) {
+      console.error("Failed to fetch applications:", dbError)
+      setError(dbError.message)
+    } else {
       setApplications(data || [])
-      setLoading(false)
+      setError(null)
     }
-    fetch()
+    setLoading(false)
   }, [taskId])
 
-  return {
-    applications, loading, refetch: () => {
-      supabase
-        .from('applications')
-        .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate, total_tasks_helped)')
-        .eq('task_id', taskId)
-        .order('created_at', { ascending: false })
-        .then(({ data }) => setApplications(data || []))
-    }
-  }
+  useEffect(() => {
+    fetchApps()
+  }, [fetchApps])
+
+  return { applications, loading, error, refetch: fetchApps }
 }
 
 export function useUserApplications(userId) {
@@ -152,33 +153,4 @@ export function useUserApplications(userId) {
   }, [userId])
 
   return applicationTaskIds
-}
-export function useApplications(taskId) {
-  const [applications, setApplications] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null) // Added error state
-
-  const fetchApps = useCallback(async () => {
-    setLoading(true)
-    const { data, error: dbError } = await supabase
-      .from('applications')
-      .select('*, applicant:profiles!applicant_id(id, full_name, username, avatar_url, reputation_score, completion_rate)')
-      .eq('task_id', taskId)
-      .order('created_at', { ascending: false })
-    
-    if (dbError) {
-      console.error("Failed to fetch applications:", dbError)
-      setError(dbError.message)
-    } else {
-      setApplications(data || [])
-      setError(null)
-    }
-    setLoading(false)
-  }, [taskId])
-
-  useEffect(() => {
-    if (taskId) fetchApps()
-  }, [taskId, fetchApps])
-
-  return { applications, loading, error, refetch: fetchApps }
 }

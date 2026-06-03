@@ -31,6 +31,9 @@ import SkillSwapsPage from './pages/SkillSwapsPage'
 import StudyGroupChatPage from './pages/StudyGroupChatPage'
 import SkillSwapChatPage from './pages/SkillSwapChatPage'
 import ReferralsPage from './pages/ReferralsPage'
+import ProblemsPage from './pages/ProblemsPage'
+import ProjectsPage from './pages/ProjectsPage'
+import PublicProfilePage from './pages/PublicProfilePage'
 
 function ProtectedRoute({ children }) {
   const { user, loading, profile, refreshProfile } = useAuth()
@@ -55,22 +58,15 @@ function ProtectedRoute({ children }) {
     )
   }
 
-<<<<<<< HEAD
-=======
   // 4. Logged in, but profile fetch is in-flight (Spinner)
   // Ensure we STRICTLY return here if profile is undefined, preventing fallthrough
->>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
   if (profile === undefined) {
     return <div className="min-h-screen flex items-center justify-center bg-bg"><LoadingSpinner text="Connecting to profile..." /></div>
   }
 
-<<<<<<< HEAD
-  const needsOnboarding = profile === null || !profile.onboarding_completed
-=======
   // 5. Decision: profile is null (New User) or incomplete row
   // We only reach here if profile is explicitly an object or explicitly null.
   const needsOnboarding = profile === null || profile.onboarding_completed === false
->>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a
 
   if (needsOnboarding && location.pathname !== '/onboarding') {
     return <Navigate to="/onboarding" replace />
@@ -79,7 +75,6 @@ function ProtectedRoute({ children }) {
   if (!needsOnboarding && location.pathname === '/onboarding') {
     return <Navigate to="/feed" replace />
   }
-<<<<<<< HEAD
 
   return children
 }
@@ -142,6 +137,9 @@ function AnimatedRoutes() {
           <Route path="/swaps" element={<ProtectedRoute><AppLayout><SkillSwapsPage /></AppLayout></ProtectedRoute>} />
           <Route path="/swap-chat/:id" element={<ProtectedRoute><AppLayout><SkillSwapChatPage /></AppLayout></ProtectedRoute>} />
           <Route path="/referrals" element={<ProtectedRoute><AppLayout><ReferralsPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/problems" element={<ProtectedRoute><AppLayout><ProblemsPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/projects" element={<ProtectedRoute><AppLayout><ProjectsPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/u/:username" element={<PublicProfilePage />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -151,6 +149,8 @@ function AnimatedRoutes() {
   )
 }
 
+import LevelUpCelebration from './components/ui/LevelUpCelebration'
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -159,6 +159,7 @@ export default function App() {
           <AuthProvider>
             <NotificationProvider>
               <AnimatedRoutes />
+              <LevelUpCelebration />
             </NotificationProvider>
           </AuthProvider>
         </ToastProvider>
@@ -166,5 +167,3 @@ export default function App() {
     </BrowserRouter>
   )
 }
-=======
->>>>>>> 93f7ad95b3997df3f0200ac8c9d13d2570f9192a

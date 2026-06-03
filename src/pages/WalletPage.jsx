@@ -281,7 +281,7 @@ export default function WalletPage() {
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
             className="relative overflow-hidden rounded-3xl mb-5 p-5 cursor-pointer hover:scale-[1.01] transition-transform"
             style={{ background: 'linear-gradient(135deg, #17171D, #1A1526)', border: '1px solid rgba(168,85,247,0.15)' }}
-            onClick={() => window.location.href = '/referrals'}
+            onClick={() => navigate('/referrals')}
           >
             <div className="absolute -top-16 -right-16 w-48 h-48 rounded-full blur-3xl opacity-15"
               style={{ background: 'radial-gradient(circle, #A855F7, transparent)' }} />

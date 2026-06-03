@@ -1,11 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Megaphone, PlusCircle, Trophy, User } from 'lucide-react'
+import { Home, Flame, PlusCircle, Briefcase, User } from 'lucide-react'
 
 const items = [
   { to: '/feed', icon: Home, label: 'Feed' },
-  { to: '/notices', icon: Megaphone, label: 'Notices' },
+  { to: '/problems', icon: Flame, label: 'Problems' },
   { to: '/post-task', icon: PlusCircle, label: 'Post' },
-  { to: '/leaderboard', icon: Trophy, label: 'Board' },
+  { to: '/projects', icon: Briefcase, label: 'Projects' },
   { to: '/profile', icon: User, label: 'Profile' },
 ]
 

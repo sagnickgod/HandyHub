@@ -2,6 +2,8 @@ import { motion } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
 import { useUserBadges, useAllBadges } from '../hooks/useProfile'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
+import { useToast } from '../components/ui/Toast'
+import { drawAchievementCard, downloadCanvasCard, shareCanvasCard } from '../lib/canvasCard'
 
 const CATEGORY_META = {
   skill:    { label: 'Skill Mastery', emoji: '🛠️', color: '#7C6FF7', glow: 'rgba(124,111,247,0.3)' },
@@ -10,7 +12,7 @@ const CATEGORY_META = {
   elite:    { label: 'Elite',         emoji: '👑', color: '#FBBF24', glow: 'rgba(251,191,36,0.3)' },
 }
 
-function BadgeCard({ badge, earned, earnedDate, index }) {
+function BadgeCard({ badge, earned, earnedDate, index, onShare }) {
   const color = badge.color || '#7C6FF7'
   return (
     <motion.div
@@ -18,7 +20,8 @@ function BadgeCard({ badge, earned, earnedDate, index }) {
       animate={{ opacity: 1, scale: 1, y: 0 }}
       transition={{ delay: index * 0.05, type: 'spring', stiffness: 200 }}
       whileHover={earned ? { y: -6, scale: 1.04 } : {}}
-      className="relative overflow-hidden rounded-2xl text-center cursor-default"
+      onClick={() => earned && onShare && onShare(badge)}
+      className={`relative overflow-hidden rounded-2xl text-center ${earned ? 'cursor-pointer' : 'cursor-default'}`}
       style={{
         background: earned ? 'linear-gradient(135deg, #17171D, #14141A)' : '#111116',
         border: earned ? `1px solid ${color}25` : '1px solid rgba(255,255,255,0.04)',
@@ -60,7 +63,8 @@ function BadgeCard({ badge, earned, earnedDate, index }) {
 }
 
 export default function BadgesPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
+  const { addToast } = useToast()
   const { badges: userBadges, loading } = useUserBadges(user?.id)
   const allBadges = useAllBadges()
 
@@ -69,6 +73,32 @@ export default function BadgesPage() {
   const locked = allBadges.filter(b => !earnedIds.has(b.id))
   const categories = ['skill', 'activity', 'trust', 'elite']
   const progress = allBadges.length > 0 ? (earned.length / allBadges.length) * 100 : 0
+
+  const handleShareBadge = async (badge) => {
+    try {
+      const canvas = drawAchievementCard({
+        username: profile?.full_name || profile?.username || 'Student',
+        type: 'badge',
+        emoji: badge.icon || '🏆',
+        title: `${badge.name} Unlocked! 🏆`,
+        subtitle: badge.description,
+        pointsText: 'Elite Badge Earned'
+      })
+      const shared = await shareCanvasCard(canvas, {
+        title: `HandyHub Badge Earned! 🏆`,
+        text: `I just unlocked the "${badge.name}" elite badge on HandyHub! 🚀`
+      })
+      if (!shared) {
+        downloadCanvasCard(canvas, `badge-${badge.id}.png`)
+        addToast('Achievement card downloaded! 📥', 'success')
+      } else {
+        addToast('Achievement shared! 🚀', 'success')
+      }
+    } catch (e) {
+      console.error(e)
+      addToast('Could not share achievement.', 'error')
+    }
+  }
 
   if (loading) return <LoadingSpinner text="Loading badges..." />
 
@@ -146,7 +176,7 @@ export default function BadgesPage() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {earned.map((b, i) => {
                 const ub = userBadges.find(u => u.badge_id === b.id)
-                return <BadgeCard key={b.id} badge={b} earned index={i} earnedDate={ub?.earned_at} />
+                return <BadgeCard key={b.id} badge={b} earned index={i} earnedDate={ub?.earned_at} onShare={handleShareBadge} />
               })}
             </div>
           )}

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Calendar, Clock, Paperclip, CheckCircle, XCircle, AlertTriangle, Users, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Calendar, Clock, Paperclip, CheckCircle, XCircle, AlertTriangle, Users, MessageSquare, Share2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useAuth } from '../context/AuthContext'
 import { useTask, useApplications } from '../hooks/useTasks'
@@ -18,6 +18,8 @@ import ApplyModal from '../components/modals/ApplyModal'
 import SelectHelperModal from '../components/modals/SelectHelperModal'
 import SubmitProofModal from '../components/modals/SubmitProofModal'
 import RatingModal from '../components/modals/RatingModal'
+import { logHighlight } from '../lib/activityLogger'
+import { drawAchievementCard, downloadCanvasCard, shareCanvasCard } from '../lib/canvasCard'
 
 const CATEGORY_COLORS = {
   coding: '#7C6FF7', study: '#38BDF8', tech: '#FBBF24',
@@ -49,6 +51,37 @@ export default function TaskDetailPage() {
   const [showProof, setShowProof] = useState(false)
   const [showRating, setShowRating] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
+  const [sharingCard, setSharingCard] = useState(false)
+  
+  const handleShareAchievement = async () => {
+    setSharingCard(true)
+    try {
+      const helperName = task.helper?.full_name || task.helper?.username || profile?.full_name || 'Student'
+      const canvas = drawAchievementCard({
+        username: helperName,
+        type: 'task',
+        emoji: '⚡',
+        title: 'Task Completed! ⚡',
+        subtitle: task.title,
+        pointsText: `+${task.points_offered} coins earned`
+      })
+      const shared = await shareCanvasCard(canvas, {
+        title: 'HandyHub Task Completed!',
+        text: `I just completed the task "${task.title}" on HandyHub and earned ${task.points_offered} coins! 🚀`
+      })
+      if (!shared) {
+        downloadCanvasCard(canvas, `achievement-${task.id}.png`)
+        addToast('Canvas card downloaded! 📥', 'success')
+      } else {
+        addToast('Achievement shared! 🚀', 'success')
+      }
+    } catch (e) {
+      console.error(e)
+      addToast('Could not share achievement.', 'error')
+    } finally {
+      setSharingCard(false)
+    }
+  }
 
   if (loading) return <LoadingSpinner text="Loading task..." />
   if (!task) return <div className="p-8 text-center text-white/30">Task not found</div>
@@ -73,8 +106,75 @@ export default function TaskDetailPage() {
         let newStreak = 1
         if (helperProfile.last_active_date === yesterday) newStreak = (helperProfile.streak_count || 0) + 1
         else if (helperProfile.last_active_date === today) newStreak = helperProfile.streak_count || 1
-        await supabase.from('profiles').update({ last_active_date: today, streak_count: newStreak, longest_streak: Math.max(newStreak, helperProfile.longest_streak || 0) }).eq('id', task.selected_helper_id)
+        
+        await supabase.from('profiles').update({ 
+          last_active_date: today, 
+          streak_count: newStreak, 
+          longest_streak: Math.max(newStreak, helperProfile.longest_streak || 0),
+          total_tasks_helped: (helperProfile.total_tasks_helped || 0) + 1
+        }).eq('id', task.selected_helper_id)
+
+        // Referral reward loop check
+        try {
+          const { data: referral } = await supabase
+            .from('referrals')
+            .select('*')
+            .eq('referred_id', task.selected_helper_id)
+            .eq('bonus_awarded', false)
+            .maybeSingle()
+
+          if (referral && (helperProfile.total_tasks_helped || 0) === 0) {
+            // Reward Referred Helper: +150 points
+            const { data: helperP } = await supabase.from('profiles').select('points_balance').eq('id', task.selected_helper_id).single()
+            if (helperP) {
+              await supabase.from('profiles').update({
+                points_balance: (helperP.points_balance || 0) + 150
+              }).eq('id', task.selected_helper_id)
+
+              await supabase.from('point_transactions').insert({
+                user_id: task.selected_helper_id,
+                type: 'bonus',
+                amount: 150,
+                description: 'Referral activation: completed first task!',
+                task_id: task.id
+              })
+            }
+
+            // Reward Referrer: +150 points
+            const { data: referrerP } = await supabase.from('profiles').select('points_balance').eq('id', referral.referrer_id).single()
+            if (referrerP) {
+              await supabase.from('profiles').update({
+                points_balance: (referrerP.points_balance || 0) + 150
+              }).eq('id', referral.referrer_id)
+
+              await supabase.from('point_transactions').insert({
+                user_id: referral.referrer_id,
+                type: 'bonus',
+                amount: 150,
+                description: 'Referral bonus: invited friend completed their first task!',
+                task_id: task.id
+              })
+
+              await supabase.from('notifications').insert({
+                user_id: referral.referrer_id,
+                type: 'bonus',
+                title: 'Referral reward earned! 🎁',
+                body: `Your friend completed their first task. You earned 150 points!`,
+                link: '/wallet'
+              })
+            }
+
+            // Mark referral record as awarded
+            await supabase.from('referrals').update({ bonus_awarded: true }).eq('id', referral.id)
+          }
+        } catch (refErr) {
+          console.error('[ReferralReward] Failed to award referral bonus:', refErr)
+        }
       }
+
+      // Log highlight for completed task helper
+      await logHighlight(task.selected_helper_id, 'task_helped', 'Completed Task! ⚡', `Helped resolve: "${task.title}"`, task.id)
+
       const { data: pp } = await supabase.from('profiles').select('total_tasks_posted').eq('id', task.poster_id).single()
       await supabase.from('profiles').update({ total_tasks_posted: (pp?.total_tasks_posted || 0) + 1 }).eq('id', task.poster_id)
       await supabase.from('notifications').insert({ user_id: task.selected_helper_id, type: 'approved', title: `Task "${task.title}" approved! 🎉`, body: `You earned ${task.points_offered} points!`, link: `/tasks/${task.id}` })
@@ -393,6 +493,18 @@ export default function TaskDetailPage() {
                 </motion.div>
                 <p className="font-heading font-black text-emerald-400 text-lg">Task Completed!</p>
                 <p className="text-white/35 text-sm mt-1">🪙 {task.points_offered} points transferred successfully</p>
+                
+                {/* Share Card Option */}
+                <div className="mt-5 p-4 rounded-2xl flex flex-col items-center justify-center gap-2" 
+                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <p className="text-white/40 text-xs">Verify your co-curricular record on your socials</p>
+                  <motion.button onClick={handleShareAchievement} disabled={sharingCard} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                    className="w-full py-2.5 rounded-xl font-bold text-white text-xs flex items-center justify-center gap-2"
+                    style={{ background: 'linear-gradient(135deg, rgba(168,85,247,0.8), rgba(124,111,247,0.8))', border: '1px solid rgba(168,85,247,0.3)' }}>
+                    <Share2 size={13} /> {sharingCard ? 'Sharing...' : 'Share Achievement Card'}
+                  </motion.button>
+                </div>
+
                 {(isPoster || isHelper) && !hasRated && (
                   <div className="mt-5 p-4 rounded-2xl" style={{ background: 'rgba(124,111,247,0.1)', border: '1px solid rgba(124,111,247,0.2)' }}>
                     <p className="text-white/55 text-sm mb-3">Rate your experience to help the community</p>

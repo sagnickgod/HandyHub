@@ -27,7 +27,9 @@ export default function ReferralsPage() {
       // Ensure code exists
       let currentCode = profile.referral_code
       if (!currentCode) {
-        currentCode = profile.username?.toUpperCase().slice(0, 4) + Math.random().toString(36).slice(2, 4).toUpperCase()
+        const usernameBase = profile.username || profile.full_name || 'USER'
+        const cleanBase = usernameBase.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
+        currentCode = (cleanBase.slice(0, 4) || 'USER') + Math.random().toString(36).slice(2, 4).toUpperCase()
         await supabase.from('profiles').update({ referral_code: currentCode }).eq('id', profile.id)
       }
       setCode(currentCode)
@@ -147,7 +149,7 @@ export default function ReferralsPage() {
             <EmptyState 
               title="No referrals yet" 
               description="Share your code with friends to earn bonus points when they sign up."
-              icon={<Users size={32} className="text-white/20" />}
+              icon={Users}
             />
           ) : (
             <div className="space-y-3">
@@ -162,7 +164,19 @@ export default function ReferralsPage() {
                   <div className="flex-1">
                     <p className="text-white font-bold text-sm">{ref.full_name}</p>
                     <div className="flex items-center gap-2 text-[10px] text-white/30 mt-1">
-                      <span className="flex items-center gap-1"><Clock size={10} /> Joined {ref.created_at ? formatDistanceToNow(new Date(ref.created_at)) : 'a while'} ago</span>
+                      <span className="flex items-center gap-1">
+                        <Clock size={10} /> 
+                        Joined {(() => {
+                          if (!ref.created_at) return 'a while'
+                          try {
+                            const d = new Date(ref.created_at)
+                            if (isNaN(d.getTime())) return 'a while'
+                            return formatDistanceToNow(d)
+                          } catch (e) {
+                            return 'a while'
+                          }
+                        })()} ago
+                      </span>
                       <span>•</span>
                       <span className="text-amber-400/80">+{150} pts earned</span>
                     </div>
@@ -170,7 +184,12 @@ export default function ReferralsPage() {
                   
                   <div className="text-right">
                     <div className="text-[10px] text-white/30 mb-0.5 uppercase tracking-wider font-bold">Reputation</div>
-                    <div className="text-sm font-black text-white/80">⭐ {ref.reputation_score?.toFixed(1) || '0.0'}</div>
+                    <div className="text-sm font-black text-white/80">
+                      ⭐ {(() => {
+                        const num = Number(ref.reputation_score)
+                        return isNaN(num) ? '0.0' : num.toFixed(1)
+                      })()}
+                    </div>
                   </div>
                 </div>
               ))}

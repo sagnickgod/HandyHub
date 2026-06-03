@@ -25,6 +25,7 @@ export default function OnboardingPage() {
   const [skills, setSkills] = useState([])
   const [availability, setAvailability] = useState('anytime')
   const [bio, setBio] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [loading, setLoading] = useState(false)
 
   const toggleSkill = (id) => setSkills(p => p.includes(id) ? p.filter(s => s !== id) : [...p, id])
@@ -42,6 +43,26 @@ export default function OnboardingPage() {
       setLoading(true)
       const metadata = user?.user_metadata || {}
 
+      let referredBy = null
+      let referrerId = null
+
+      // Check if invite code was provided
+      if (inviteCode.trim()) {
+        const cleanCode = inviteCode.trim().toUpperCase()
+        const { data: referrer } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('referral_code', cleanCode)
+          .maybeSingle()
+        
+        if (referrer) {
+          referredBy = referrer.id
+          referrerId = referrer.id
+        } else {
+          addToast('Invalid referral invite code, but onboarding continuing...', 'warning')
+        }
+      }
+
       // Upsert profile: handles both new users (INSERT) and re-submitters (UPDATE).
       // Critically sets onboarding_completed = true so the redirect logic never
       // sends this user back to /onboarding again.
@@ -57,6 +78,8 @@ export default function OnboardingPage() {
           availability,
           bio: bio ? bio.trim() : null,
           points_balance: 1000,
+          referred_by: referredBy,
+          referral_code: Math.random().toString(36).slice(2, 8).toUpperCase(), // Ensure new user gets their unique referral code!
           onboarding_completed: true, // <-- THE KEY FLAG
         }, { onConflict: 'id' }),
         8000,
@@ -79,6 +102,15 @@ export default function OnboardingPage() {
       }).then(({ error }) => {
         if (error) console.warn("[Onboarding] Bonus point insert warning:", error)
       })
+
+      // Record referral connection
+      if (referrerId) {
+        await supabase.from('referrals').insert({
+          referrer_id: referrerId,
+          referred_id: user.id,
+          bonus_awarded: false
+        }).catch(() => {})
+      }
 
       // Refresh AuthContext so ProtectedRoute reads the updated onboarding_completed
       await withTimeout(refreshProfile(), 8000, 'Context Refresh')
@@ -206,8 +238,20 @@ export default function OnboardingPage() {
                       value={bio}
                       onChange={e => e.target.value.length <= 120 && setBio(e.target.value)}
                       placeholder="I'm a sophomore CS major. I build keyboards and love helping with math!"
-                      rows={4}
+                      rows={3}
                       className="w-full bg-[#0A0A0F] border border-white/10 rounded-2xl px-5 py-4 text-white placeholder-white/30 focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-bold text-white/70 block mb-2">Referral Invite Code (optional)</label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={inviteCode}
+                      onChange={e => setInviteCode(e.target.value.toUpperCase())}
+                      placeholder="ENTER CODE"
+                      className="w-full bg-[#0A0A0F] border border-white/10 rounded-2xl px-5 py-4 text-white placeholder-white/30 font-mono tracking-widest focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none"
                     />
                   </div>
                 </div>
